@@ -1,0 +1,8 @@
+include:
+  - project: homelab/homelab-ci
+    file: golang.yml
+
+variables:
+  GO_VERSION: "1.24"
+  BINARY_NAME: "kmbridge"
+  COVERAGE_THRESHOLD: "70"
