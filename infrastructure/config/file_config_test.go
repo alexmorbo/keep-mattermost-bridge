@@ -396,12 +396,21 @@ func TestLoadFromEnvValid(t *testing.T) {
 }
 
 func TestLoadFromEnvDefaults(t *testing.T) {
+	// Required vars
 	t.Setenv("MATTERMOST_URL", "https://mattermost.example.com")
 	t.Setenv("MATTERMOST_TOKEN", "test-token")
 	t.Setenv("KEEP_URL", "https://keep.example.com")
 	t.Setenv("KEEP_API_KEY", "keep-key")
 	t.Setenv("KEEP_UI_URL", "https://keep-ui.example.com")
 	t.Setenv("CALLBACK_URL", "https://callback.example.com")
+
+	// Clear env vars that have defaults to ensure isolation from CI
+	t.Setenv("SERVER_PORT", "")
+	t.Setenv("LOG_LEVEL", "")
+	t.Setenv("REDIS_ADDR", "")
+	t.Setenv("REDIS_PASSWORD", "")
+	t.Setenv("REDIS_DB", "")
+	t.Setenv("CONFIG_PATH", "")
 
 	cfg, err := LoadFromEnv()
 	require.NoError(t, err)
