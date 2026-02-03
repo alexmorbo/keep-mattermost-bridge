@@ -92,7 +92,16 @@ func (m *mockKeepClient) GetProviders(ctx context.Context) ([]port.KeepProvider,
 func (m *mockKeepClient) CreateWebhookProvider(ctx context.Context, config port.WebhookProviderConfig) error {
 	m.createWebhookCalled = true
 	m.createdWebhookConfig = config
-	return m.createWebhookErr
+	if m.createWebhookErr != nil {
+		return m.createWebhookErr
+	}
+	// Simulate provider being created - add to providers list
+	m.providers = append(m.providers, port.KeepProvider{
+		ID:   "created-provider-id",
+		Type: "webhook",
+		Name: config.Name,
+	})
+	return nil
 }
 
 func (m *mockKeepClient) GetWorkflows(ctx context.Context) ([]port.KeepWorkflow, error) {

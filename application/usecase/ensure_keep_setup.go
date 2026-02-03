@@ -80,13 +80,25 @@ func (uc *EnsureKeepSetupUseCase) ensureProvider(ctx context.Context) error {
 		return fmt.Errorf("create webhook provider: %w", err)
 	}
 
-	uc.logger.Info("Keep webhook provider created successfully",
-		logger.ApplicationFields("provider_created",
-			slog.String("provider_name", providerName),
-		),
-	)
+	// Verify provider was created by checking it appears in the list
+	providers, err = uc.keepClient.GetProviders(ctx)
+	if err != nil {
+		return fmt.Errorf("verify provider creation: %w", err)
+	}
 
-	return nil
+	for _, p := range providers {
+		if p.Type == "webhook" && p.Name == providerName {
+			uc.logger.Info("Keep webhook provider created and verified",
+				logger.ApplicationFields("provider_created",
+					slog.String("provider_name", providerName),
+					slog.String("provider_id", p.ID),
+				),
+			)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("provider created but not found in providers list")
 }
 
 func (uc *EnsureKeepSetupUseCase) ensureWorkflow(ctx context.Context) error {
