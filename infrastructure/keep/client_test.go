@@ -767,20 +767,27 @@ func TestGetWorkflowsJSONDecodeError(t *testing.T) {
 }
 
 func TestCreateWorkflowSuccess(t *testing.T) {
-	var capturedRequest workflowCreateRequest
 	var capturedAPIKey string
 	var capturedPath string
+	var capturedWorkflowContent string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedPath = r.URL.Path
 		capturedAPIKey = r.Header.Get("X-API-KEY")
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		assert.Contains(t, r.Header.Get("Content-Type"), "multipart/form-data")
 
-		body, err := io.ReadAll(r.Body)
+		// Parse multipart form
+		err := r.ParseMultipartForm(10 << 20)
 		require.NoError(t, err)
-		err = json.Unmarshal(body, &capturedRequest)
+
+		file, _, err := r.FormFile("file")
 		require.NoError(t, err)
+		defer file.Close()
+
+		content, err := io.ReadAll(file)
+		require.NoError(t, err)
+		capturedWorkflowContent = string(content)
 
 		w.WriteHeader(http.StatusCreated)
 	}))
@@ -800,10 +807,7 @@ func TestCreateWorkflowSuccess(t *testing.T) {
 
 	assert.Equal(t, "/workflows", capturedPath)
 	assert.Equal(t, "test-api-key", capturedAPIKey)
-	assert.Equal(t, "mattermost-notification", capturedRequest.ID)
-	assert.Equal(t, "Mattermost Notification", capturedRequest.Name)
-	assert.Equal(t, "Send alerts to Mattermost", capturedRequest.Description)
-	assert.Equal(t, "workflow:\n  id: test\n  steps: []", capturedRequest.Workflow)
+	assert.Equal(t, "workflow:\n  id: test\n  steps: []", capturedWorkflowContent)
 }
 
 func TestCreateWorkflowSuccessWithOKStatus(t *testing.T) {

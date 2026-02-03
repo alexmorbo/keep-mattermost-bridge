@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"time"
@@ -467,35 +468,33 @@ func (c *Client) GetWorkflows(ctx context.Context) ([]port.KeepWorkflow, error) 
 	return workflows, nil
 }
 
-type workflowCreateRequest struct {
-	ID          string `json:"id,omitempty"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-	Workflow    string `json:"workflow"`
-}
-
 func (c *Client) CreateWorkflow(ctx context.Context, config port.WorkflowConfig) error {
 	start := time.Now()
 	reqURL := c.baseURL + "/workflows"
 
-	body := workflowCreateRequest{
-		ID:          config.ID,
-		Name:        config.Name,
-		Description: config.Description,
-		Workflow:    config.Workflow,
-	}
+	// Keep API requires multipart/form-data with file field
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
 
-	jsonBody, err := json.Marshal(body)
+	part, err := writer.CreateFormFile("file", "workflow.yaml")
 	if err != nil {
-		return fmt.Errorf("marshal workflow body: %w", err)
+		return fmt.Errorf("create form file: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(jsonBody))
+	if _, err := part.Write([]byte(config.Workflow)); err != nil {
+		return fmt.Errorf("write workflow content: %w", err)
+	}
+
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, &buf)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("X-API-KEY", c.apiKey)
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
