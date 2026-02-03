@@ -59,8 +59,8 @@ func NewClient(baseURL, apiKey string, logger *slog.Logger) *Client {
 }
 
 type enrichRequest struct {
-	Fingerprint string `json:"fingerprint"`
-	Status      string `json:"status"`
+	Fingerprint string            `json:"fingerprint"`
+	Enrichments map[string]string `json:"enrichments"`
 }
 
 type unenrichRequest struct {
@@ -73,7 +73,7 @@ func (c *Client) EnrichAlert(ctx context.Context, fingerprint, status string) er
 
 	body := enrichRequest{
 		Fingerprint: fingerprint,
-		Status:      status,
+		Enrichments: map[string]string{"status": status},
 	}
 
 	jsonBody, err := json.Marshal(body)

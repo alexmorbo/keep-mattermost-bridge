@@ -43,7 +43,7 @@ func TestEnrichAlertSuccess(t *testing.T) {
 
 	assert.Equal(t, "test-api-key", capturedAPIKey)
 	assert.Equal(t, "fp-12345", capturedRequest.Fingerprint)
-	assert.Equal(t, "acknowledged", capturedRequest.Status)
+	assert.Equal(t, "acknowledged", capturedRequest.Enrichments["status"])
 }
 
 func TestEnrichAlertSuccessWithCreatedStatus(t *testing.T) {
