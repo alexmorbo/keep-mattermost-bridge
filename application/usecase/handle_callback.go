@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -48,8 +49,6 @@ func NewHandleCallbackUseCase(
 func (uc *HandleCallbackUseCase) Execute(ctx context.Context, input dto.MattermostCallbackInput) (*dto.CallbackOutput, error) {
 	action := input.Context["action"]
 	fingerprintStr := input.Context["fingerprint"]
-	alertName := input.Context["alert_name"]
-	severityStr := input.Context["severity"]
 
 	uc.logger.Info("Callback received",
 		logger.ApplicationFields("callback_received",
@@ -71,7 +70,12 @@ func (uc *HandleCallbackUseCase) Execute(ctx context.Context, input dto.Mattermo
 		return nil, fmt.Errorf("parse fingerprint: %w", err)
 	}
 
-	severity, err := alert.NewSeverity(severityStr)
+	keepAlert, err := uc.keepClient.GetAlert(ctx, fingerprintStr)
+	if err != nil {
+		return nil, fmt.Errorf("get alert from keep: %w", err)
+	}
+
+	severity, err := alert.NewSeverity(keepAlert.Severity)
 	if err != nil {
 		return nil, fmt.Errorf("parse severity: %w", err)
 	}
@@ -89,15 +93,18 @@ func (uc *HandleCallbackUseCase) Execute(ctx context.Context, input dto.Mattermo
 	if action == "acknowledge" {
 		statusStr = alert.StatusAcknowledged
 	}
+
+	source := strings.Join(keepAlert.Source, ", ")
+
 	a := alert.RestoreAlert(
 		fingerprint,
-		alertName,
+		keepAlert.Name,
 		severity,
 		alert.RestoreStatus(statusStr),
-		"",
-		"",
-		nil,
-		time.Time{},
+		keepAlert.Description,
+		source,
+		keepAlert.Labels,
+		keepAlert.FiringStartTime,
 	)
 
 	switch action {

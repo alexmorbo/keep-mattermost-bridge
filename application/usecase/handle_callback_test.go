@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/alexmorbo/keep-mattermost-bridge/application/dto"
+	"github.com/alexmorbo/keep-mattermost-bridge/application/port"
 	"github.com/alexmorbo/keep-mattermost-bridge/domain/alert"
 	"github.com/alexmorbo/keep-mattermost-bridge/domain/post"
 )
@@ -21,10 +22,23 @@ type mockKeepClient struct {
 	enrichAlertCalled   bool
 	enrichedStatus      string
 	enrichedFingerprint string
+	getAlertErr         error
+	getAlertResponse    *port.KeepAlert
 }
 
 func newMockKeepClient() *mockKeepClient {
-	return &mockKeepClient{}
+	return &mockKeepClient{
+		getAlertResponse: &port.KeepAlert{
+			Fingerprint:     "fp-12345",
+			Name:            "Test Alert",
+			Status:          "firing",
+			Severity:        "high",
+			Description:     "Test description",
+			Source:          []string{"prometheus"},
+			Labels:          map[string]string{"env": "test"},
+			FiringStartTime: time.Time{},
+		},
+	}
 }
 
 func (m *mockKeepClient) EnrichAlert(ctx context.Context, fingerprint, status string) error {
@@ -35,6 +49,15 @@ func (m *mockKeepClient) EnrichAlert(ctx context.Context, fingerprint, status st
 		return m.enrichAlertErr
 	}
 	return nil
+}
+
+func (m *mockKeepClient) GetAlert(ctx context.Context, fingerprint string) (*port.KeepAlert, error) {
+	if m.getAlertErr != nil {
+		return nil, m.getAlertErr
+	}
+	resp := *m.getAlertResponse
+	resp.Fingerprint = fingerprint
+	return &resp, nil
 }
 
 type mockMattermostClientCallback struct {
@@ -118,8 +141,6 @@ func TestHandleCallbackUseCase_Acknowledge(t *testing.T) {
 		Context: map[string]string{
 			"action":      "acknowledge",
 			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
-			"severity":    "high",
 		},
 	}
 
@@ -149,8 +170,6 @@ func TestHandleCallbackUseCase_Resolve(t *testing.T) {
 		Context: map[string]string{
 			"action":      "resolve",
 			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
-			"severity":    "high",
 		},
 	}
 
@@ -178,9 +197,7 @@ func TestHandleCallbackUseCase_MissingFingerprint(t *testing.T) {
 	input := dto.MattermostCallbackInput{
 		UserID: "user-123",
 		Context: map[string]string{
-			"action":     "acknowledge",
-			"alert_name": "Test Alert",
-			"severity":   "high",
+			"action": "acknowledge",
 		},
 	}
 
@@ -199,8 +216,6 @@ func TestHandleCallbackUseCase_EmptyFingerprint(t *testing.T) {
 		Context: map[string]string{
 			"action":      "acknowledge",
 			"fingerprint": "",
-			"alert_name":  "Test Alert",
-			"severity":    "high",
 		},
 	}
 
@@ -211,16 +226,16 @@ func TestHandleCallbackUseCase_EmptyFingerprint(t *testing.T) {
 }
 
 func TestHandleCallbackUseCase_InvalidSeverity(t *testing.T) {
-	uc, _, _, _ := setupHandleCallbackUseCase()
+	uc, _, keepClient, _ := setupHandleCallbackUseCase()
 	ctx := context.Background()
+
+	keepClient.getAlertResponse.Severity = "invalid"
 
 	input := dto.MattermostCallbackInput{
 		UserID: "user-123",
 		Context: map[string]string{
 			"action":      "acknowledge",
 			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
-			"severity":    "invalid",
 		},
 	}
 
@@ -230,7 +245,27 @@ func TestHandleCallbackUseCase_InvalidSeverity(t *testing.T) {
 	assert.Contains(t, err.Error(), "parse severity")
 }
 
-func TestHandleCallbackUseCase_KeepAPIError(t *testing.T) {
+func TestHandleCallbackUseCase_GetAlertError(t *testing.T) {
+	uc, _, keepClient, _ := setupHandleCallbackUseCase()
+	ctx := context.Background()
+
+	keepClient.getAlertErr = errors.New("keep api error")
+
+	input := dto.MattermostCallbackInput{
+		UserID: "user-123",
+		Context: map[string]string{
+			"action":      "acknowledge",
+			"fingerprint": "fp-12345",
+		},
+	}
+
+	_, err := uc.Execute(ctx, input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "get alert from keep")
+}
+
+func TestHandleCallbackUseCase_EnrichAPIError(t *testing.T) {
 	uc, _, keepClient, _ := setupHandleCallbackUseCase()
 	ctx := context.Background()
 
@@ -241,8 +276,6 @@ func TestHandleCallbackUseCase_KeepAPIError(t *testing.T) {
 		Context: map[string]string{
 			"action":      "acknowledge",
 			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
-			"severity":    "high",
 		},
 	}
 
@@ -264,8 +297,6 @@ func TestHandleCallbackUseCase_PostNotFoundOnResolve(t *testing.T) {
 		Context: map[string]string{
 			"action":      "resolve",
 			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
-			"severity":    "high",
 		},
 	}
 
@@ -288,8 +319,6 @@ func TestHandleCallbackUseCase_UnknownAction(t *testing.T) {
 		Context: map[string]string{
 			"action":      "unknown",
 			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
-			"severity":    "high",
 		},
 	}
 
@@ -310,8 +339,6 @@ func TestHandleCallbackUseCase_GetUserError(t *testing.T) {
 		Context: map[string]string{
 			"action":      "acknowledge",
 			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
-			"severity":    "high",
 		},
 	}
 
@@ -335,8 +362,6 @@ func TestHandleCallbackUseCase_ResolveDeleteError(t *testing.T) {
 		Context: map[string]string{
 			"action":      "resolve",
 			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
-			"severity":    "high",
 		},
 	}
 
@@ -347,20 +372,20 @@ func TestHandleCallbackUseCase_ResolveDeleteError(t *testing.T) {
 }
 
 func TestHandleCallbackUseCase_AcknowledgeWithDifferentSeverities(t *testing.T) {
-	severities := []string{"critical", "high", "warning", "info"}
+	severities := []string{"critical", "high", "warning", "info", "low"}
 
 	for _, severity := range severities {
 		t.Run("severity_"+severity, func(t *testing.T) {
 			uc, _, keepClient, _ := setupHandleCallbackUseCase()
 			ctx := context.Background()
 
+			keepClient.getAlertResponse.Severity = severity
+
 			input := dto.MattermostCallbackInput{
 				UserID: "user-123",
 				Context: map[string]string{
 					"action":      "acknowledge",
 					"fingerprint": "fp-12345",
-					"alert_name":  "Test Alert",
-					"severity":    severity,
 				},
 			}
 
@@ -376,20 +401,20 @@ func TestHandleCallbackUseCase_AcknowledgeWithDifferentSeverities(t *testing.T) 
 }
 
 func TestHandleCallbackUseCase_ResolveWithDifferentSeverities(t *testing.T) {
-	severities := []string{"critical", "high", "warning", "info"}
+	severities := []string{"critical", "high", "warning", "info", "low"}
 
 	for _, severity := range severities {
 		t.Run("severity_"+severity, func(t *testing.T) {
 			uc, _, keepClient, _ := setupHandleCallbackUseCase()
 			ctx := context.Background()
 
+			keepClient.getAlertResponse.Severity = severity
+
 			input := dto.MattermostCallbackInput{
 				UserID: "user-123",
 				Context: map[string]string{
 					"action":      "resolve",
 					"fingerprint": "fp-12345",
-					"alert_name":  "Test Alert",
-					"severity":    severity,
 				},
 			}
 
