@@ -142,7 +142,7 @@ func TestBuildFiringAttachment(t *testing.T) {
 			assert.Equal(t, tt.expectedColor, attachment.Color, "color mismatch")
 			assert.Contains(t, attachment.Pretext, tt.expectedEmoji, "emoji not in pretext")
 			assert.Contains(t, attachment.Pretext, tt.alertName, "alert name not in pretext")
-			assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?alertPayloadFingerprint=test-fingerprint-123")
+			assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?fingerprint=test-fingerprint-123")
 			assert.Equal(t, tt.expectedFields, len(attachment.Fields), "fields count mismatch")
 
 			if tt.hasButtons {
@@ -199,7 +199,7 @@ func TestBuildAcknowledgedAttachment(t *testing.T) {
 	assert.Contains(t, attachment.Pretext, ":eyes:")
 	assert.Contains(t, attachment.Pretext, "ACKNOWLEDGED")
 	assert.Contains(t, attachment.Pretext, "Test Alert")
-	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?alertPayloadFingerprint=ack-fingerprint-456")
+	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?fingerprint=ack-fingerprint-456")
 
 	assert.Len(t, attachment.Actions, 1, "should have only Resolve button")
 	assert.Equal(t, "resolve", attachment.Actions[0].ID)
@@ -247,7 +247,7 @@ func TestBuildResolvedAttachment(t *testing.T) {
 	assert.Contains(t, attachment.Pretext, ":white_check_mark:")
 	assert.Contains(t, attachment.Pretext, "RESOLVED")
 	assert.Contains(t, attachment.Pretext, "Resolved Alert")
-	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?alertPayloadFingerprint=resolved-fingerprint-789")
+	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?fingerprint=resolved-fingerprint-789")
 
 	assert.Len(t, attachment.Actions, 0, "should have no buttons")
 
