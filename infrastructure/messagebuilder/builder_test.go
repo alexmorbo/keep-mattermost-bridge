@@ -28,7 +28,7 @@ func TestBuildFiringAttachment(t *testing.T) {
 			fileConfig: &config.FileConfig{
 				Message: config.MessageConfig{
 					Colors: map[string]string{"critical": "#CC0000"},
-					Emoji:  map[string]string{"critical": ":rotating_light:"},
+					Emoji:  map[string]string{"critical": "🔴"},
 					Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
 				},
 				Labels: config.LabelsConfig{
@@ -42,7 +42,7 @@ func TestBuildFiringAttachment(t *testing.T) {
 			alertDesc:      "CPU usage exceeded 90%",
 			labels:         map[string]string{"host": "server-1", "job": "monitoring"},
 			expectedColor:  "#CC0000",
-			expectedEmoji:  ":rotating_light:",
+			expectedEmoji:  "🔴",
 			expectedFields: 3,
 			hasButtons:     true,
 		},
@@ -51,7 +51,7 @@ func TestBuildFiringAttachment(t *testing.T) {
 			fileConfig: &config.FileConfig{
 				Message: config.MessageConfig{
 					Colors: map[string]string{"warning": "#EDA200"},
-					Emoji:  map[string]string{"warning": ":warning:"},
+					Emoji:  map[string]string{"warning": "🟡"},
 					Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
 				},
 				Labels: config.LabelsConfig{
@@ -65,7 +65,7 @@ func TestBuildFiringAttachment(t *testing.T) {
 			alertDesc:      "",
 			labels:         map[string]string{"service": "api", "ignored": "value"},
 			expectedColor:  "#EDA200",
-			expectedEmoji:  ":warning:",
+			expectedEmoji:  "🟡",
 			expectedFields: 1,
 			hasButtons:     true,
 		},
@@ -74,7 +74,7 @@ func TestBuildFiringAttachment(t *testing.T) {
 			fileConfig: &config.FileConfig{
 				Message: config.MessageConfig{
 					Colors: map[string]string{"info": "#0066FF"},
-					Emoji:  map[string]string{"info": ":information_source:"},
+					Emoji:  map[string]string{"info": "🔵"},
 					Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
 				},
 				Labels: config.LabelsConfig{
@@ -88,7 +88,7 @@ func TestBuildFiringAttachment(t *testing.T) {
 			alertDesc:      "Service started successfully",
 			labels:         map[string]string{"host": "server-1", "internal": "skip-me"},
 			expectedColor:  "#0066FF",
-			expectedEmoji:  ":information_source:",
+			expectedEmoji:  "🔵",
 			expectedFields: 2,
 			hasButtons:     true,
 		},
@@ -97,7 +97,7 @@ func TestBuildFiringAttachment(t *testing.T) {
 			fileConfig: &config.FileConfig{
 				Message: config.MessageConfig{
 					Colors: map[string]string{"high": "#FF6600"},
-					Emoji:  map[string]string{"high": ":fire:"},
+					Emoji:  map[string]string{"high": "🟠"},
 					Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
 				},
 				Labels: config.LabelsConfig{
@@ -111,7 +111,7 @@ func TestBuildFiringAttachment(t *testing.T) {
 			alertDesc:      "Cannot connect to database",
 			labels:         map[string]string{"job": "db-monitor", "host": "db-01"},
 			expectedColor:  "#FF6600",
-			expectedEmoji:  ":fire:",
+			expectedEmoji:  "🟠",
 			expectedFields: 3,
 			hasButtons:     true,
 		},
@@ -140,8 +140,8 @@ func TestBuildFiringAttachment(t *testing.T) {
 			attachment := builder.BuildFiringAttachment(testAlert, "http://callback.url", "http://keep.ui")
 
 			assert.Equal(t, tt.expectedColor, attachment.Color, "color mismatch")
-			assert.Contains(t, attachment.Pretext, tt.expectedEmoji, "emoji not in pretext")
-			assert.Contains(t, attachment.Pretext, tt.alertName, "alert name not in pretext")
+			assert.Contains(t, attachment.Title, tt.expectedEmoji, "emoji not in title")
+			assert.Contains(t, attachment.Title, tt.alertName, "alert name not in title")
 			assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?fingerprint=test-fingerprint-123")
 			assert.Equal(t, tt.expectedFields, len(attachment.Fields), "fields count mismatch")
 
@@ -196,9 +196,9 @@ func TestBuildAcknowledgedAttachment(t *testing.T) {
 	attachment := builder.BuildAcknowledgedAttachment(testAlert, "http://callback.url", "http://keep.ui", "john.doe")
 
 	assert.Equal(t, "#FFA500", attachment.Color, "should have orange color")
-	assert.Contains(t, attachment.Pretext, ":eyes:")
-	assert.Contains(t, attachment.Pretext, "ACKNOWLEDGED")
-	assert.Contains(t, attachment.Pretext, "Test Alert")
+	assert.Contains(t, attachment.Title, "👀")
+	assert.Contains(t, attachment.Title, "ACKNOWLEDGED")
+	assert.Contains(t, attachment.Title, "Test Alert")
 	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?fingerprint=ack-fingerprint-456")
 
 	assert.Len(t, attachment.Actions, 1, "should have only Resolve button")
@@ -244,9 +244,9 @@ func TestBuildResolvedAttachment(t *testing.T) {
 	attachment := builder.BuildResolvedAttachment(testAlert, "http://keep.ui")
 
 	assert.Equal(t, "#00CC00", attachment.Color, "should have green color")
-	assert.Contains(t, attachment.Pretext, ":white_check_mark:")
-	assert.Contains(t, attachment.Pretext, "RESOLVED")
-	assert.Contains(t, attachment.Pretext, "Resolved Alert")
+	assert.Contains(t, attachment.Title, "✅")
+	assert.Contains(t, attachment.Title, "RESOLVED")
+	assert.Contains(t, attachment.Title, "Resolved Alert")
 	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?fingerprint=resolved-fingerprint-789")
 
 	assert.Len(t, attachment.Actions, 0, "should have no buttons")
@@ -328,7 +328,7 @@ func TestBuildFieldsFiltering(t *testing.T) {
 			fileConfig := &config.FileConfig{
 				Message: config.MessageConfig{
 					Colors: map[string]string{"info": "#0066FF"},
-					Emoji:  map[string]string{"info": ":information_source:"},
+					Emoji:  map[string]string{"info": "🔵"},
 					Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
 				},
 				Labels: config.LabelsConfig{
@@ -382,10 +382,10 @@ func TestDifferentSeveritiesProduceDifferentColorsAndEmojis(t *testing.T) {
 				"info":     "#0066FF",
 			},
 			Emoji: map[string]string{
-				"critical": ":rotating_light:",
-				"high":     ":fire:",
-				"warning":  ":warning:",
-				"info":     ":information_source:",
+				"critical": "🔴",
+				"high":     "🟠",
+				"warning":  "🟡",
+				"info":     "🔵",
 			},
 			Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
 		},
@@ -399,10 +399,10 @@ func TestDifferentSeveritiesProduceDifferentColorsAndEmojis(t *testing.T) {
 		expectedColor string
 		expectedEmoji string
 	}{
-		{"critical", "#CC0000", ":rotating_light:"},
-		{"high", "#FF6600", ":fire:"},
-		{"warning", "#EDA200", ":warning:"},
-		{"info", "#0066FF", ":information_source:"},
+		{"critical", "#CC0000", "🔴"},
+		{"high", "#FF6600", "🟠"},
+		{"warning", "#EDA200", "🟡"},
+		{"info", "#0066FF", "🔵"},
 	}
 
 	for _, sv := range severities {
@@ -426,7 +426,7 @@ func TestDifferentSeveritiesProduceDifferentColorsAndEmojis(t *testing.T) {
 			attachment := builder.BuildFiringAttachment(testAlert, "http://callback.url", "http://keep.ui")
 
 			assert.Equal(t, sv.expectedColor, attachment.Color)
-			assert.Contains(t, attachment.Pretext, sv.expectedEmoji)
+			assert.Contains(t, attachment.Title, sv.expectedEmoji)
 		})
 	}
 }

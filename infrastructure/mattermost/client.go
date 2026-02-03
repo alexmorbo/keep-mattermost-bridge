@@ -72,7 +72,6 @@ type userResponse struct {
 
 type wireAttachment struct {
 	Color      string       `json:"color,omitempty"`
-	Pretext    string       `json:"pretext,omitempty"`
 	Title      string       `json:"title,omitempty"`
 	TitleLink  string       `json:"title_link,omitempty"`
 	Text       string       `json:"text,omitempty"`
@@ -89,6 +88,7 @@ type wireField struct {
 }
 
 type wireButton struct {
+	Type        string                `json:"type"`
 	ID          string                `json:"id"`
 	Name        string                `json:"name"`
 	Integration wireButtonIntegration `json:"integration"`
@@ -108,6 +108,7 @@ func toWireAttachment(a post.Attachment) wireAttachment {
 	buttons := make([]wireButton, len(a.Actions))
 	for i, b := range a.Actions {
 		buttons[i] = wireButton{
+			Type: "button",
 			ID:   b.ID,
 			Name: b.Name,
 			Integration: wireButtonIntegration{
@@ -118,14 +119,13 @@ func toWireAttachment(a post.Attachment) wireAttachment {
 	}
 
 	return wireAttachment{
-		Color:      a.Color,
-		Pretext:    a.Pretext,
-		Title:      a.Title,
-		TitleLink:  a.TitleLink,
-		Text:       a.Text,
-		Fields:     fields,
-		Actions:    buttons,
-		Footer:     a.Footer,
+		Color:     a.Color,
+		Title:     a.Title,
+		TitleLink: a.TitleLink,
+		Text:      a.Text,
+		Fields:    fields,
+		Actions:   buttons,
+		Footer:    a.Footer,
 		FooterIcon: a.FooterIcon,
 	}
 }

@@ -79,10 +79,10 @@ func (c *FileConfig) applyDefaults() {
 	}
 	if c.Message.Emoji == nil {
 		c.Message.Emoji = map[string]string{
-			"critical": ":rotating_light:",
-			"high":     ":fire:",
-			"warning":  ":warning:",
-			"info":     ":information_source:",
+			"critical": "🔴",
+			"high":     "🟠",
+			"warning":  "🟡",
+			"info":     "🔵",
 		}
 	}
 	if c.Message.Footer.Text == "" {

@@ -2,7 +2,6 @@ package post
 
 type Attachment struct {
 	Color      string
-	Pretext    string
 	Title      string
 	TitleLink  string
 	Text       string

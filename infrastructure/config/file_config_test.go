@@ -311,10 +311,10 @@ func TestApplyDefaults(t *testing.T) {
 	assert.Equal(t, "#00CC00", cfg.Message.Colors["resolved"])
 
 	assert.NotNil(t, cfg.Message.Emoji)
-	assert.Equal(t, ":rotating_light:", cfg.Message.Emoji["critical"])
-	assert.Equal(t, ":fire:", cfg.Message.Emoji["high"])
-	assert.Equal(t, ":warning:", cfg.Message.Emoji["warning"])
-	assert.Equal(t, ":information_source:", cfg.Message.Emoji["info"])
+	assert.Equal(t, "🔴", cfg.Message.Emoji["critical"])
+	assert.Equal(t, "🟠", cfg.Message.Emoji["high"])
+	assert.Equal(t, "🟡", cfg.Message.Emoji["warning"])
+	assert.Equal(t, "🔵", cfg.Message.Emoji["info"])
 
 	assert.Equal(t, "Keep AIOps", cfg.Message.Footer.Text)
 	assert.Equal(t, "https://avatars.githubusercontent.com/u/109032290?v=4", cfg.Message.Footer.IconURL)
