@@ -119,13 +119,13 @@ func toWireAttachment(a post.Attachment) wireAttachment {
 	}
 
 	return wireAttachment{
-		Color:     a.Color,
-		Title:     a.Title,
-		TitleLink: a.TitleLink,
-		Text:      a.Text,
-		Fields:    fields,
-		Actions:   buttons,
-		Footer:    a.Footer,
+		Color:      a.Color,
+		Title:      a.Title,
+		TitleLink:  a.TitleLink,
+		Text:       a.Text,
+		Fields:     fields,
+		Actions:    buttons,
+		Footer:     a.Footer,
 		FooterIcon: a.FooterIcon,
 	}
 }
