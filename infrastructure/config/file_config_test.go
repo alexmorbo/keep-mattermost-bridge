@@ -65,7 +65,6 @@ labels:
 	assert.Equal(t, ":alert:", cfg.Message.Emoji["critical"])
 	assert.Equal(t, "Custom Footer", cfg.Message.Footer.Text)
 	assert.Equal(t, "https://custom.com/icon.png", cfg.Message.Footer.IconURL)
-	assert.Equal(t, "CustomBot", cfg.Message.Bot.Username)
 
 	assert.Contains(t, cfg.Labels.Display, "host")
 	assert.Contains(t, cfg.Labels.Display, "service")
@@ -320,9 +319,6 @@ func TestApplyDefaults(t *testing.T) {
 	assert.Equal(t, "Keep AIOps", cfg.Message.Footer.Text)
 	assert.Equal(t, "https://avatars.githubusercontent.com/u/109032290?v=4", cfg.Message.Footer.IconURL)
 
-	assert.Equal(t, "Keep", cfg.Message.Bot.Username)
-	assert.Equal(t, "https://avatars.githubusercontent.com/u/109032290?v=4", cfg.Message.Bot.IconURL)
-
 	assert.NotNil(t, cfg.Labels.Rename)
 }
 
@@ -360,7 +356,6 @@ message:
 
 	assert.NotNil(t, cfg.Message.Colors, "should have default colors map")
 	assert.Equal(t, "#CC0000", cfg.Message.Colors["critical"], "should have default critical color")
-	assert.NotEmpty(t, cfg.Message.Bot.Username, "should have default bot username")
 }
 
 func TestLoadFromEnvValid(t *testing.T) {

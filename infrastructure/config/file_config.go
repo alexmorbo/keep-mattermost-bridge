@@ -28,17 +28,11 @@ type MessageConfig struct {
 	Colors map[string]string `yaml:"colors"`
 	Emoji  map[string]string `yaml:"emoji"`
 	Footer FooterConfig      `yaml:"footer"`
-	Bot    BotConfig         `yaml:"bot"`
 }
 
 type FooterConfig struct {
 	Text    string `yaml:"text"`
 	IconURL string `yaml:"icon_url"`
-}
-
-type BotConfig struct {
-	Username string `yaml:"username"`
-	IconURL  string `yaml:"icon_url"`
 }
 
 type LabelsConfig struct {
@@ -96,12 +90,6 @@ func (c *FileConfig) applyDefaults() {
 	}
 	if c.Message.Footer.IconURL == "" {
 		c.Message.Footer.IconURL = "https://avatars.githubusercontent.com/u/109032290?v=4"
-	}
-	if c.Message.Bot.Username == "" {
-		c.Message.Bot.Username = "Keep"
-	}
-	if c.Message.Bot.IconURL == "" {
-		c.Message.Bot.IconURL = "https://avatars.githubusercontent.com/u/109032290?v=4"
 	}
 	if c.Labels.Rename == nil {
 		c.Labels.Rename = make(map[string]string)
