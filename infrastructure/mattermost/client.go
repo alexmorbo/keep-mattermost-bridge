@@ -72,6 +72,7 @@ type userResponse struct {
 
 type wireAttachment struct {
 	Color      string       `json:"color,omitempty"`
+	Pretext    string       `json:"pretext,omitempty"`
 	Title      string       `json:"title,omitempty"`
 	TitleLink  string       `json:"title_link,omitempty"`
 	Text       string       `json:"text,omitempty"`
@@ -118,6 +119,7 @@ func toWireAttachment(a post.Attachment) wireAttachment {
 
 	return wireAttachment{
 		Color:      a.Color,
+		Pretext:    a.Pretext,
 		Title:      a.Title,
 		TitleLink:  a.TitleLink,
 		Text:       a.Text,

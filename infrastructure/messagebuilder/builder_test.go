@@ -140,9 +140,9 @@ func TestBuildFiringAttachment(t *testing.T) {
 			attachment := builder.BuildFiringAttachment(testAlert, "http://callback.url", "http://keep.ui")
 
 			assert.Equal(t, tt.expectedColor, attachment.Color, "color mismatch")
-			assert.Contains(t, attachment.Title, tt.expectedEmoji, "emoji not in title")
-			assert.Contains(t, attachment.Title, tt.alertName, "alert name not in title")
-			assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts?fingerprint=test-fingerprint-123")
+			assert.Contains(t, attachment.Pretext, tt.expectedEmoji, "emoji not in pretext")
+			assert.Contains(t, attachment.Pretext, tt.alertName, "alert name not in pretext")
+			assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?alertPayloadFingerprint=test-fingerprint-123")
 			assert.Equal(t, tt.expectedFields, len(attachment.Fields), "fields count mismatch")
 
 			if tt.hasButtons {
@@ -196,10 +196,10 @@ func TestBuildAcknowledgedAttachment(t *testing.T) {
 	attachment := builder.BuildAcknowledgedAttachment(testAlert, "http://callback.url", "http://keep.ui", "john.doe")
 
 	assert.Equal(t, "#FFA500", attachment.Color, "should have orange color")
-	assert.Contains(t, attachment.Title, ":eyes:")
-	assert.Contains(t, attachment.Title, "ACKNOWLEDGED")
-	assert.Contains(t, attachment.Title, "Test Alert")
-	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts?fingerprint=ack-fingerprint-456")
+	assert.Contains(t, attachment.Pretext, ":eyes:")
+	assert.Contains(t, attachment.Pretext, "ACKNOWLEDGED")
+	assert.Contains(t, attachment.Pretext, "Test Alert")
+	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?alertPayloadFingerprint=ack-fingerprint-456")
 
 	assert.Len(t, attachment.Actions, 1, "should have only Resolve button")
 	assert.Equal(t, "resolve", attachment.Actions[0].ID)
@@ -244,10 +244,10 @@ func TestBuildResolvedAttachment(t *testing.T) {
 	attachment := builder.BuildResolvedAttachment(testAlert, "http://keep.ui")
 
 	assert.Equal(t, "#00CC00", attachment.Color, "should have green color")
-	assert.Contains(t, attachment.Title, ":white_check_mark:")
-	assert.Contains(t, attachment.Title, "RESOLVED")
-	assert.Contains(t, attachment.Title, "Resolved Alert")
-	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts?fingerprint=resolved-fingerprint-789")
+	assert.Contains(t, attachment.Pretext, ":white_check_mark:")
+	assert.Contains(t, attachment.Pretext, "RESOLVED")
+	assert.Contains(t, attachment.Pretext, "Resolved Alert")
+	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?alertPayloadFingerprint=resolved-fingerprint-789")
 
 	assert.Len(t, attachment.Actions, 0, "should have no buttons")
 
@@ -426,7 +426,7 @@ func TestDifferentSeveritiesProduceDifferentColorsAndEmojis(t *testing.T) {
 			attachment := builder.BuildFiringAttachment(testAlert, "http://callback.url", "http://keep.ui")
 
 			assert.Equal(t, sv.expectedColor, attachment.Color)
-			assert.Contains(t, attachment.Title, sv.expectedEmoji)
+			assert.Contains(t, attachment.Pretext, sv.expectedEmoji)
 		})
 	}
 }

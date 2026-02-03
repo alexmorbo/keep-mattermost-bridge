@@ -25,8 +25,8 @@ func (b *Builder) BuildFiringAttachment(a *alert.Alert, callbackURL, keepUIURL s
 	color := b.msgConfig.ColorForSeverity(severity)
 	emoji := b.msgConfig.EmojiForSeverity(severity)
 
-	title := fmt.Sprintf("%s %s | %s", emoji, strings.ToUpper(severity), a.Name())
-	titleLink := fmt.Sprintf("%s/alerts?fingerprint=%s", keepUIURL, url.QueryEscape(a.Fingerprint().Value()))
+	pretext := fmt.Sprintf("%s **%s** | %s", emoji, strings.ToUpper(severity), a.Name())
+	titleLink := fmt.Sprintf("%s/alerts/feed?alertPayloadFingerprint=%s", keepUIURL, url.QueryEscape(a.Fingerprint().Value()))
 
 	fields := b.buildFields(a.Labels())
 
@@ -67,7 +67,8 @@ func (b *Builder) BuildFiringAttachment(a *alert.Alert, callbackURL, keepUIURL s
 
 	return post.Attachment{
 		Color:      color,
-		Title:      title,
+		Pretext:    pretext,
+		Title:      "View in Keep",
 		TitleLink:  titleLink,
 		Fields:     fields,
 		Actions:    buttons,
@@ -80,8 +81,8 @@ func (b *Builder) BuildAcknowledgedAttachment(a *alert.Alert, callbackURL, keepU
 	severity := a.Severity().String()
 	color := b.msgConfig.ColorForSeverity("acknowledged")
 
-	title := fmt.Sprintf(":eyes: ACKNOWLEDGED | %s", a.Name())
-	titleLink := fmt.Sprintf("%s/alerts?fingerprint=%s", keepUIURL, url.QueryEscape(a.Fingerprint().Value()))
+	pretext := fmt.Sprintf(":eyes: **ACKNOWLEDGED** | %s", a.Name())
+	titleLink := fmt.Sprintf("%s/alerts/feed?alertPayloadFingerprint=%s", keepUIURL, url.QueryEscape(a.Fingerprint().Value()))
 
 	fields := b.buildFields(a.Labels())
 
@@ -115,7 +116,8 @@ func (b *Builder) BuildAcknowledgedAttachment(a *alert.Alert, callbackURL, keepU
 
 	return post.Attachment{
 		Color:      color,
-		Title:      title,
+		Pretext:    pretext,
+		Title:      "View in Keep",
 		TitleLink:  titleLink,
 		Fields:     fields,
 		Actions:    buttons,
@@ -127,8 +129,8 @@ func (b *Builder) BuildAcknowledgedAttachment(a *alert.Alert, callbackURL, keepU
 func (b *Builder) BuildResolvedAttachment(a *alert.Alert, keepUIURL string) post.Attachment {
 	color := b.msgConfig.ColorForSeverity("resolved")
 
-	title := fmt.Sprintf(":white_check_mark: RESOLVED | %s", a.Name())
-	titleLink := fmt.Sprintf("%s/alerts?fingerprint=%s", keepUIURL, url.QueryEscape(a.Fingerprint().Value()))
+	pretext := fmt.Sprintf(":white_check_mark: **RESOLVED** | %s", a.Name())
+	titleLink := fmt.Sprintf("%s/alerts/feed?alertPayloadFingerprint=%s", keepUIURL, url.QueryEscape(a.Fingerprint().Value()))
 
 	fields := b.buildFields(a.Labels())
 
@@ -145,7 +147,8 @@ func (b *Builder) BuildResolvedAttachment(a *alert.Alert, keepUIURL string) post
 
 	return post.Attachment{
 		Color:      color,
-		Title:      title,
+		Pretext:    pretext,
+		Title:      "View in Keep",
 		TitleLink:  titleLink,
 		Fields:     fields,
 		Footer:     footer,
