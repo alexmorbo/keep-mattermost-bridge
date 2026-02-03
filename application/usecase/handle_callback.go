@@ -58,7 +58,7 @@ func (uc *HandleCallbackUseCase) Execute(ctx context.Context, input dto.Mattermo
 		),
 	)
 
-	validActions := map[string]bool{"acknowledge": true, "resolve": true}
+	validActions := map[string]bool{"acknowledge": true, "resolve": true, "unacknowledge": true}
 	metricAction := "unknown"
 	if validActions[action] {
 		metricAction = action
@@ -112,6 +112,8 @@ func (uc *HandleCallbackUseCase) Execute(ctx context.Context, input dto.Mattermo
 		return uc.handleAcknowledge(ctx, a, fingerprint, username)
 	case "resolve":
 		return uc.handleResolve(ctx, a, fingerprint, username)
+	case "unacknowledge":
+		return uc.handleUnacknowledge(ctx, a, fingerprint, username)
 	default:
 		return nil, fmt.Errorf("unknown action: %s", action)
 	}
@@ -181,6 +183,38 @@ func (uc *HandleCallbackUseCase) handleResolve(ctx context.Context, a *alert.Ale
 	return &dto.CallbackOutput{
 		Attachment: dto.NewAttachmentDTO(attachment),
 		Ephemeral:  fmt.Sprintf("Alert resolved by @%s", username),
+	}, nil
+}
+
+func (uc *HandleCallbackUseCase) handleUnacknowledge(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username string) (*dto.CallbackOutput, error) {
+	_ = ctx
+	uc.wg.Add(1)
+	go func() {
+		defer uc.wg.Done()
+		unenrichCtx, unenrichCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer unenrichCancel()
+		if err := uc.keepClient.UnenrichAlert(unenrichCtx, fingerprint.Value()); err != nil {
+			uc.logger.Error("Failed to unenrich alert in Keep",
+				slog.String("fingerprint", fingerprint.Value()),
+				slog.String("error", err.Error()),
+			)
+		}
+	}()
+
+	attachment := uc.msgBuilder.BuildFiringAttachment(a, uc.callbackURL, uc.keepUIURL)
+
+	uc.logger.Info("Callback processed",
+		logger.ApplicationFields("callback_processed",
+			slog.String("action", "unacknowledge"),
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("username", username),
+		),
+	)
+	alertUnackCounter.Inc()
+
+	return &dto.CallbackOutput{
+		Attachment: dto.NewAttachmentDTO(attachment),
+		Ephemeral:  fmt.Sprintf("Alert unacknowledged by @%s", username),
 	}, nil
 }
 

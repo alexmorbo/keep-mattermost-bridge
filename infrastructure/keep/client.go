@@ -18,10 +18,20 @@ import (
 )
 
 var (
-	keepEnrichOK    = metrics.NewCounter(`keep_api_calls_total{operation="enrich",status="ok"}`)
-	keepEnrichErr   = metrics.NewCounter(`keep_api_calls_total{operation="enrich",status="error"}`)
-	keepGetAlertOK  = metrics.NewCounter(`keep_api_calls_total{operation="get_alert",status="ok"}`)
-	keepGetAlertErr = metrics.NewCounter(`keep_api_calls_total{operation="get_alert",status="error"}`)
+	keepEnrichOK          = metrics.NewCounter(`keep_api_calls_total{operation="enrich",status="ok"}`)
+	keepEnrichErr         = metrics.NewCounter(`keep_api_calls_total{operation="enrich",status="error"}`)
+	keepUnenrichOK        = metrics.NewCounter(`keep_api_calls_total{operation="unenrich",status="ok"}`)
+	keepUnenrichErr       = metrics.NewCounter(`keep_api_calls_total{operation="unenrich",status="error"}`)
+	keepGetAlertOK        = metrics.NewCounter(`keep_api_calls_total{operation="get_alert",status="ok"}`)
+	keepGetAlertErr       = metrics.NewCounter(`keep_api_calls_total{operation="get_alert",status="error"}`)
+	keepGetProvidersOK    = metrics.NewCounter(`keep_api_calls_total{operation="get_providers",status="ok"}`)
+	keepGetProvidersErr   = metrics.NewCounter(`keep_api_calls_total{operation="get_providers",status="error"}`)
+	keepCreateProviderOK  = metrics.NewCounter(`keep_api_calls_total{operation="create_provider",status="ok"}`)
+	keepCreateProviderErr = metrics.NewCounter(`keep_api_calls_total{operation="create_provider",status="error"}`)
+	keepGetWorkflowsOK    = metrics.NewCounter(`keep_api_calls_total{operation="get_workflows",status="ok"}`)
+	keepGetWorkflowsErr   = metrics.NewCounter(`keep_api_calls_total{operation="get_workflows",status="error"}`)
+	keepCreateWorkflowOK  = metrics.NewCounter(`keep_api_calls_total{operation="create_workflow",status="ok"}`)
+	keepCreateWorkflowErr = metrics.NewCounter(`keep_api_calls_total{operation="create_workflow",status="error"}`)
 )
 
 type Client struct {
@@ -52,9 +62,13 @@ type enrichRequest struct {
 	Status      string `json:"status"`
 }
 
+type unenrichRequest struct {
+	Fingerprint string `json:"fingerprint"`
+}
+
 func (c *Client) EnrichAlert(ctx context.Context, fingerprint, status string) error {
 	start := time.Now()
-	reqURL := c.baseURL + "/api/alerts/enrich"
+	reqURL := c.baseURL + "/alerts/enrich"
 
 	body := enrichRequest{
 		Fingerprint: fingerprint,
@@ -105,6 +119,58 @@ func (c *Client) EnrichAlert(ctx context.Context, fingerprint, status string) er
 	return nil
 }
 
+func (c *Client) UnenrichAlert(ctx context.Context, fingerprint string) error {
+	start := time.Now()
+	reqURL := c.baseURL + "/alerts/unenrich"
+
+	body := unenrichRequest{
+		Fingerprint: fingerprint,
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal unenrich body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(jsonBody))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("X-API-KEY", c.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		duration := time.Since(start).Milliseconds()
+		c.logger.Error("Keep UnenrichAlert failed",
+			logger.ExternalFieldsWithError("keep", reqURL, "POST", 0, duration, err.Error()),
+		)
+		keepUnenrichErr.Inc()
+		return fmt.Errorf("keep unenrich alert: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	duration := time.Since(start).Milliseconds()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		c.logger.Error("Keep UnenrichAlert non-2xx",
+			logger.ExternalFieldsWithError("keep", reqURL, "POST", resp.StatusCode, duration, string(respBody)),
+		)
+		keepUnenrichErr.Inc()
+		return fmt.Errorf("keep unenrich alert: status %d, body: %s", resp.StatusCode, respBody)
+	}
+
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	c.logger.Debug("Keep UnenrichAlert completed",
+		logger.ExternalFields("keep", reqURL, "POST", resp.StatusCode, duration),
+	)
+	keepUnenrichOK.Inc()
+
+	return nil
+}
+
 type alertResponse struct {
 	Fingerprint     string         `json:"fingerprint"`
 	Name            string         `json:"name"`
@@ -119,7 +185,7 @@ type alertResponse struct {
 
 func (c *Client) GetAlert(ctx context.Context, fingerprint string) (*port.KeepAlert, error) {
 	start := time.Now()
-	reqURL := c.baseURL + "/api/alerts/" + url.PathEscape(fingerprint)
+	reqURL := c.baseURL + "/alerts/" + url.PathEscape(fingerprint)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
@@ -192,4 +258,269 @@ func (c *Client) GetAlert(ctx context.Context, fingerprint string) (*port.KeepAl
 		Labels:          labels,
 		FiringStartTime: firingStartTime,
 	}, nil
+}
+
+type providersResponse struct {
+	InstalledProviders []providerResponse `json:"installed_providers"`
+}
+
+type providerResponse struct {
+	ID      string         `json:"id"`
+	Type    string         `json:"type"`
+	Details map[string]any `json:"details"`
+}
+
+func (c *Client) GetProviders(ctx context.Context) ([]port.KeepProvider, error) {
+	start := time.Now()
+	reqURL := c.baseURL + "/providers"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("X-API-KEY", c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		duration := time.Since(start).Milliseconds()
+		c.logger.Error("Keep GetProviders failed",
+			logger.ExternalFieldsWithError("keep", reqURL, "GET", 0, duration, err.Error()),
+		)
+		keepGetProvidersErr.Inc()
+		return nil, fmt.Errorf("keep get providers: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	duration := time.Since(start).Milliseconds()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		c.logger.Error("Keep GetProviders non-200",
+			logger.ExternalFieldsWithError("keep", reqURL, "GET", resp.StatusCode, duration, string(respBody)),
+		)
+		keepGetProvidersErr.Inc()
+		return nil, fmt.Errorf("keep get providers: status %d, body: %s", resp.StatusCode, respBody)
+	}
+
+	var providersResp providersResponse
+	if err := json.NewDecoder(resp.Body).Decode(&providersResp); err != nil {
+		c.logger.Error("Keep GetProviders decode failed",
+			logger.ExternalFieldsWithError("keep", reqURL, "GET", resp.StatusCode, duration, err.Error()),
+		)
+		keepGetProvidersErr.Inc()
+		return nil, fmt.Errorf("decode providers response: %w", err)
+	}
+
+	c.logger.Debug("Keep GetProviders completed",
+		logger.ExternalFields("keep", reqURL, "GET", resp.StatusCode, duration),
+	)
+	keepGetProvidersOK.Inc()
+
+	providers := make([]port.KeepProvider, 0, len(providersResp.InstalledProviders))
+	for _, p := range providersResp.InstalledProviders {
+		name := ""
+		if p.Details != nil {
+			if n, ok := p.Details["name"].(string); ok {
+				name = n
+			}
+		}
+		providers = append(providers, port.KeepProvider{
+			ID:      p.ID,
+			Type:    p.Type,
+			Name:    name,
+			Details: p.Details,
+		})
+	}
+
+	return providers, nil
+}
+
+type webhookProviderRequest struct {
+	ProviderName string `json:"provider_name"`
+	WebhookURL   string `json:"webhook_url"`
+	Method       string `json:"method"`
+	Verify       bool   `json:"verify"`
+}
+
+func (c *Client) CreateWebhookProvider(ctx context.Context, config port.WebhookProviderConfig) error {
+	start := time.Now()
+	reqURL := c.baseURL + "/providers/install/webhook/" + url.PathEscape(config.Name)
+
+	body := webhookProviderRequest{
+		ProviderName: config.Name,
+		WebhookURL:   config.URL,
+		Method:       config.Method,
+		Verify:       config.Verify,
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal webhook provider body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(jsonBody))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("X-API-KEY", c.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		duration := time.Since(start).Milliseconds()
+		c.logger.Error("Keep CreateWebhookProvider failed",
+			logger.ExternalFieldsWithError("keep", reqURL, "POST", 0, duration, err.Error()),
+		)
+		keepCreateProviderErr.Inc()
+		return fmt.Errorf("keep create webhook provider: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	duration := time.Since(start).Milliseconds()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		c.logger.Error("Keep CreateWebhookProvider non-2xx",
+			logger.ExternalFieldsWithError("keep", reqURL, "POST", resp.StatusCode, duration, string(respBody)),
+		)
+		keepCreateProviderErr.Inc()
+		return fmt.Errorf("keep create webhook provider: status %d, body: %s", resp.StatusCode, respBody)
+	}
+
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	c.logger.Debug("Keep CreateWebhookProvider completed",
+		logger.ExternalFields("keep", reqURL, "POST", resp.StatusCode, duration),
+	)
+	keepCreateProviderOK.Inc()
+
+	return nil
+}
+
+type workflowResponse struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	WorkflowRawID string `json:"workflow_raw_id"`
+	Disabled      bool   `json:"disabled"`
+}
+
+func (c *Client) GetWorkflows(ctx context.Context) ([]port.KeepWorkflow, error) {
+	start := time.Now()
+	reqURL := c.baseURL + "/workflows"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("X-API-KEY", c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		duration := time.Since(start).Milliseconds()
+		c.logger.Error("Keep GetWorkflows failed",
+			logger.ExternalFieldsWithError("keep", reqURL, "GET", 0, duration, err.Error()),
+		)
+		keepGetWorkflowsErr.Inc()
+		return nil, fmt.Errorf("keep get workflows: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	duration := time.Since(start).Milliseconds()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		c.logger.Error("Keep GetWorkflows non-200",
+			logger.ExternalFieldsWithError("keep", reqURL, "GET", resp.StatusCode, duration, string(respBody)),
+		)
+		keepGetWorkflowsErr.Inc()
+		return nil, fmt.Errorf("keep get workflows: status %d, body: %s", resp.StatusCode, respBody)
+	}
+
+	var workflowsResp []workflowResponse
+	if err := json.NewDecoder(resp.Body).Decode(&workflowsResp); err != nil {
+		c.logger.Error("Keep GetWorkflows decode failed",
+			logger.ExternalFieldsWithError("keep", reqURL, "GET", resp.StatusCode, duration, err.Error()),
+		)
+		keepGetWorkflowsErr.Inc()
+		return nil, fmt.Errorf("decode workflows response: %w", err)
+	}
+
+	c.logger.Debug("Keep GetWorkflows completed",
+		logger.ExternalFields("keep", reqURL, "GET", resp.StatusCode, duration),
+	)
+	keepGetWorkflowsOK.Inc()
+
+	workflows := make([]port.KeepWorkflow, 0, len(workflowsResp))
+	for _, w := range workflowsResp {
+		workflows = append(workflows, port.KeepWorkflow{
+			ID:            w.ID,
+			Name:          w.Name,
+			WorkflowRawID: w.WorkflowRawID,
+			Disabled:      w.Disabled,
+		})
+	}
+
+	return workflows, nil
+}
+
+type workflowCreateRequest struct {
+	ID          string `json:"id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Workflow    string `json:"workflow"`
+}
+
+func (c *Client) CreateWorkflow(ctx context.Context, config port.WorkflowConfig) error {
+	start := time.Now()
+	reqURL := c.baseURL + "/workflows"
+
+	body := workflowCreateRequest{
+		ID:          config.ID,
+		Name:        config.Name,
+		Description: config.Description,
+		Workflow:    config.Workflow,
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal workflow body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(jsonBody))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("X-API-KEY", c.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		duration := time.Since(start).Milliseconds()
+		c.logger.Error("Keep CreateWorkflow failed",
+			logger.ExternalFieldsWithError("keep", reqURL, "POST", 0, duration, err.Error()),
+		)
+		keepCreateWorkflowErr.Inc()
+		return fmt.Errorf("keep create workflow: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	duration := time.Since(start).Milliseconds()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		c.logger.Error("Keep CreateWorkflow non-2xx",
+			logger.ExternalFieldsWithError("keep", reqURL, "POST", resp.StatusCode, duration, string(respBody)),
+		)
+		keepCreateWorkflowErr.Inc()
+		return fmt.Errorf("keep create workflow: status %d, body: %s", resp.StatusCode, respBody)
+	}
+
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	c.logger.Debug("Keep CreateWorkflow completed",
+		logger.ExternalFields("keep", reqURL, "POST", resp.StatusCode, duration),
+	)
+	keepCreateWorkflowOK.Inc()
+
+	return nil
 }

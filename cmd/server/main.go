@@ -66,6 +66,19 @@ func main() {
 
 	keepClient := keep.NewClient(cfg.Keep.URL, cfg.Keep.APIKey, log.With("component", "keep_client"))
 
+	// Ensure Keep setup (provider and workflow)
+	ensureSetupUC := usecase.NewEnsureKeepSetupUseCase(
+		keepClient,
+		cfg.CallbackURL+"/webhook/alert",
+		log.With("component", "ensure_keep_setup"),
+	)
+
+	setupCtx, setupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := ensureSetupUC.Execute(setupCtx); err != nil {
+		log.Warn("Failed to ensure Keep setup, continuing anyway", "error", err)
+	}
+	setupCancel()
+
 	msgBuilder := messagebuilder.NewBuilder(fileCfg)
 
 	handleAlertUC := usecase.NewHandleAlertUseCase(

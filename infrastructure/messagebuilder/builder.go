@@ -97,6 +97,19 @@ func (b *Builder) BuildAcknowledgedAttachment(a *alert.Alert, callbackURL, keepU
 
 	buttons := []post.Button{
 		{
+			ID:   "unacknowledge",
+			Name: "Unacknowledge",
+			Integration: post.ButtonIntegration{
+				URL: callbackURL,
+				Context: map[string]string{
+					"action":      "unacknowledge",
+					"fingerprint": a.Fingerprint().Value(),
+					"alert_name":  a.Name(),
+					"severity":    severity,
+				},
+			},
+		},
+		{
 			ID:   "resolve",
 			Name: "Resolve",
 			Integration: post.ButtonIntegration{

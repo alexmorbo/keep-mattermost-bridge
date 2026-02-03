@@ -202,9 +202,14 @@ func TestBuildAcknowledgedAttachment(t *testing.T) {
 	assert.Contains(t, attachment.Title, "Test Alert")
 	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?fingerprint=ack-fingerprint-456")
 
-	assert.Len(t, attachment.Actions, 1, "should have only Resolve button")
-	assert.Equal(t, "resolve", attachment.Actions[0].ID)
-	assert.Equal(t, "Resolve", attachment.Actions[0].Name)
+	assert.Len(t, attachment.Actions, 2, "should have Unacknowledge and Resolve buttons")
+	assert.Equal(t, "unacknowledge", attachment.Actions[0].ID)
+	assert.Equal(t, "Unacknowledge", attachment.Actions[0].Name)
+	assert.Equal(t, "http://callback.url", attachment.Actions[0].Integration.URL)
+	assert.Equal(t, "ack-fingerprint-456", attachment.Actions[0].Integration.Context["fingerprint"])
+	assert.Equal(t, "unacknowledge", attachment.Actions[0].Integration.Context["action"])
+	assert.Equal(t, "resolve", attachment.Actions[1].ID)
+	assert.Equal(t, "Resolve", attachment.Actions[1].Name)
 }
 
 func TestBuildResolvedAttachment(t *testing.T) {

@@ -18,12 +18,25 @@ import (
 )
 
 type mockKeepClient struct {
-	enrichAlertErr      error
-	enrichAlertCalled   bool
-	enrichedStatus      string
-	enrichedFingerprint string
-	getAlertErr         error
-	getAlertResponse    *port.KeepAlert
+	enrichAlertErr        error
+	enrichAlertCalled     bool
+	enrichedStatus        string
+	enrichedFingerprint   string
+	unenrichAlertErr      error
+	unenrichAlertCalled   bool
+	unenrichFingerprint   string
+	getAlertErr           error
+	getAlertResponse      *port.KeepAlert
+	providers             []port.KeepProvider
+	workflows             []port.KeepWorkflow
+	getProvidersErr       error
+	createWebhookErr      error
+	getWorkflowsErr       error
+	createWorkflowErr     error
+	createWebhookCalled   bool
+	createWorkflowCalled  bool
+	createdWebhookConfig  port.WebhookProviderConfig
+	createdWorkflowConfig port.WorkflowConfig
 }
 
 func newMockKeepClient() *mockKeepClient {
@@ -58,6 +71,41 @@ func (m *mockKeepClient) GetAlert(ctx context.Context, fingerprint string) (*por
 	resp := *m.getAlertResponse
 	resp.Fingerprint = fingerprint
 	return &resp, nil
+}
+
+func (m *mockKeepClient) UnenrichAlert(ctx context.Context, fingerprint string) error {
+	m.unenrichAlertCalled = true
+	m.unenrichFingerprint = fingerprint
+	if m.unenrichAlertErr != nil {
+		return m.unenrichAlertErr
+	}
+	return nil
+}
+
+func (m *mockKeepClient) GetProviders(ctx context.Context) ([]port.KeepProvider, error) {
+	if m.getProvidersErr != nil {
+		return nil, m.getProvidersErr
+	}
+	return m.providers, nil
+}
+
+func (m *mockKeepClient) CreateWebhookProvider(ctx context.Context, config port.WebhookProviderConfig) error {
+	m.createWebhookCalled = true
+	m.createdWebhookConfig = config
+	return m.createWebhookErr
+}
+
+func (m *mockKeepClient) GetWorkflows(ctx context.Context) ([]port.KeepWorkflow, error) {
+	if m.getWorkflowsErr != nil {
+		return nil, m.getWorkflowsErr
+	}
+	return m.workflows, nil
+}
+
+func (m *mockKeepClient) CreateWorkflow(ctx context.Context, config port.WorkflowConfig) error {
+	m.createWorkflowCalled = true
+	m.createdWorkflowConfig = config
+	return m.createWorkflowErr
 }
 
 type mockMattermostClientCallback struct {
@@ -465,4 +513,80 @@ func TestHandleCallbackUseCase_Wait(t *testing.T) {
 			t.Fatal("Wait did not return immediately when no goroutines pending")
 		}
 	})
+}
+
+func TestHandleCallbackUseCase_Unacknowledge(t *testing.T) {
+	uc, _, keepClient, _ := setupHandleCallbackUseCase()
+	ctx := context.Background()
+
+	input := dto.MattermostCallbackInput{
+		UserID: "user-123",
+		Context: map[string]string{
+			"action":      "unacknowledge",
+			"fingerprint": "fp-12345",
+		},
+	}
+
+	result, err := uc.Execute(ctx, input)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	time.Sleep(50 * time.Millisecond)
+	assert.True(t, keepClient.unenrichAlertCalled)
+	assert.Equal(t, "fp-12345", keepClient.unenrichFingerprint)
+	assert.Contains(t, result.Ephemeral, "Alert unacknowledged by @testuser")
+	assert.Equal(t, "#FF0000", result.Attachment.Color)
+	assert.Contains(t, result.Attachment.Title, "FIRING")
+}
+
+func TestHandleCallbackUseCase_UnacknowledgeAPIError(t *testing.T) {
+	uc, _, keepClient, _ := setupHandleCallbackUseCase()
+	ctx := context.Background()
+
+	keepClient.unenrichAlertErr = errors.New("keep api error")
+
+	input := dto.MattermostCallbackInput{
+		UserID: "user-123",
+		Context: map[string]string{
+			"action":      "unacknowledge",
+			"fingerprint": "fp-12345",
+		},
+	}
+
+	result, err := uc.Execute(ctx, input)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	time.Sleep(50 * time.Millisecond)
+	assert.True(t, keepClient.unenrichAlertCalled)
+	assert.Contains(t, result.Ephemeral, "Alert unacknowledged by @testuser")
+}
+
+func TestHandleCallbackUseCase_UnacknowledgeWithDifferentSeverities(t *testing.T) {
+	severities := []string{"critical", "high", "warning", "info", "low"}
+
+	for _, severity := range severities {
+		t.Run("severity_"+severity, func(t *testing.T) {
+			uc, _, keepClient, _ := setupHandleCallbackUseCase()
+			ctx := context.Background()
+
+			keepClient.getAlertResponse.Severity = severity
+
+			input := dto.MattermostCallbackInput{
+				UserID: "user-123",
+				Context: map[string]string{
+					"action":      "unacknowledge",
+					"fingerprint": "fp-12345",
+				},
+			}
+
+			result, err := uc.Execute(ctx, input)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			time.Sleep(50 * time.Millisecond)
+			assert.True(t, keepClient.unenrichAlertCalled)
+			assert.Contains(t, result.Ephemeral, "Alert unacknowledged by @testuser")
+		})
+	}
 }
