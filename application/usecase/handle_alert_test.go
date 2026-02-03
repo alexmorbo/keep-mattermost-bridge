@@ -162,8 +162,8 @@ func TestHandleAlertUseCase_NewFiringAlert(t *testing.T) {
 		Severity:    "high",
 		Status:      "firing",
 		Description: "Test description",
-		Source:      "prometheus",
-		Labels:      `{"env": "prod", "service": "api"}`,
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{"env": "prod", "service": "api"},
 	}
 
 	err := uc.Execute(ctx, input)
@@ -197,8 +197,8 @@ func TestHandleAlertUseCase_RefireExistingAlert(t *testing.T) {
 		Severity:    "high",
 		Status:      "firing",
 		Description: "Test description",
-		Source:      "prometheus",
-		Labels:      `{}`,
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
 	}
 
 	err := uc.Execute(ctx, input)
@@ -224,8 +224,8 @@ func TestHandleAlertUseCase_ResolveExistingAlert(t *testing.T) {
 		Severity:    "high",
 		Status:      "resolved",
 		Description: "Test description",
-		Source:      "prometheus",
-		Labels:      `{}`,
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
 	}
 
 	err := uc.Execute(ctx, input)
@@ -249,8 +249,8 @@ func TestHandleAlertUseCase_ResolveWithoutExistingPost(t *testing.T) {
 		Severity:    "high",
 		Status:      "resolved",
 		Description: "Test description",
-		Source:      "prometheus",
-		Labels:      `{}`,
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
 	}
 
 	err := uc.Execute(ctx, input)
@@ -270,8 +270,8 @@ func TestHandleAlertUseCase_InvalidFingerprint(t *testing.T) {
 		Severity:    "high",
 		Status:      "firing",
 		Description: "Test description",
-		Source:      "prometheus",
-		Labels:      `{}`,
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
 	}
 
 	err := uc.Execute(ctx, input)
@@ -290,8 +290,8 @@ func TestHandleAlertUseCase_InvalidSeverity(t *testing.T) {
 		Severity:    "invalid",
 		Status:      "firing",
 		Description: "Test description",
-		Source:      "prometheus",
-		Labels:      `{}`,
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
 	}
 
 	err := uc.Execute(ctx, input)
@@ -312,8 +312,8 @@ func TestHandleAlertUseCase_MattermostCreatePostError(t *testing.T) {
 		Severity:    "high",
 		Status:      "firing",
 		Description: "Test description",
-		Source:      "prometheus",
-		Labels:      `{}`,
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
 	}
 
 	err := uc.Execute(ctx, input)
@@ -332,8 +332,8 @@ func TestHandleAlertUseCase_LabelParsingWithPythonDict(t *testing.T) {
 		Severity:    "critical",
 		Status:      "firing",
 		Description: "Test description",
-		Source:      "prometheus",
-		Labels:      `{'env': 'production', 'service': 'api', 'region': 'us-east-1'}`,
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{"env": "production", "service": "api", "region": "us-east-1"},
 	}
 
 	err := uc.Execute(ctx, input)
@@ -353,8 +353,8 @@ func TestHandleAlertUseCase_InvalidLabelsDoesNotFailAlert(t *testing.T) {
 		Severity:    "warning",
 		Status:      "firing",
 		Description: "Test description",
-		Source:      "prometheus",
-		Labels:      `this is not valid`,
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
 	}
 
 	err := uc.Execute(ctx, input)
@@ -376,8 +376,8 @@ func TestHandleAlertUseCase_RepositorySaveError(t *testing.T) {
 		Severity:    "high",
 		Status:      "firing",
 		Description: "Test description",
-		Source:      "prometheus",
-		Labels:      `{}`,
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
 	}
 
 	err := uc.Execute(ctx, input)
@@ -401,8 +401,8 @@ func TestHandleAlertUseCase_RepositoryDeleteError(t *testing.T) {
 		Severity:    "high",
 		Status:      "resolved",
 		Description: "Test description",
-		Source:      "prometheus",
-		Labels:      `{}`,
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
 	}
 
 	err := uc.Execute(ctx, input)
@@ -421,8 +421,8 @@ func TestHandleAlertUseCase_AcknowledgedStatusIsIgnored(t *testing.T) {
 		Severity:    "high",
 		Status:      "acknowledged",
 		Description: "Test description",
-		Source:      "prometheus",
-		Labels:      `{}`,
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
 	}
 
 	err := uc.Execute(ctx, input)

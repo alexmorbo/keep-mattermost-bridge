@@ -76,10 +76,10 @@ func TestWebhookHandlerValidJSON(t *testing.T) {
 		Name:        "test-alert",
 		Status:      "firing",
 		Severity:    "critical",
-		Source:      "prometheus",
+		Source:      []string{"prometheus"},
 		Fingerprint: "abc123",
 		Description: "Test alert description",
-		Labels:      "{}",
+		Labels:      map[string]string{},
 	}
 
 	body, err := json.Marshal(alertInput)

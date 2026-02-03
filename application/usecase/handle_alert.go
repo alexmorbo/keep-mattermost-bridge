@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/alexmorbo/keep-mattermost-bridge/application/dto"
 	"github.com/alexmorbo/keep-mattermost-bridge/application/port"
@@ -59,9 +60,9 @@ func (uc *HandleAlertUseCase) Execute(ctx context.Context, input dto.KeepAlertIn
 		return fmt.Errorf("parse status: %w", err)
 	}
 
-	labels := ParsePythonDictRepr(input.Labels)
+	source := strings.Join(input.Source, ", ")
 
-	a, err := alert.NewAlert(fingerprint, input.Name, severity, status, input.Description, input.Source, labels)
+	a, err := alert.NewAlert(fingerprint, input.Name, severity, status, input.Description, source, input.Labels)
 	if err != nil {
 		return fmt.Errorf("create alert: %w", err)
 	}
