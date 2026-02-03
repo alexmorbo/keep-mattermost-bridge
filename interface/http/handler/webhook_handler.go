@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -16,15 +19,26 @@ type AlertHandler interface {
 
 type WebhookHandler struct {
 	handleAlert AlertHandler
+	logger      *slog.Logger
 }
 
-func NewWebhookHandler(handleAlert AlertHandler) *WebhookHandler {
-	return &WebhookHandler{handleAlert: handleAlert}
+func NewWebhookHandler(handleAlert AlertHandler, logger *slog.Logger) *WebhookHandler {
+	return &WebhookHandler{handleAlert: handleAlert, logger: logger}
 }
 
 func (h *WebhookHandler) HandleAlert(c *gin.Context) {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read body"})
+		return
+	}
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+
+	h.logger.Info("Incoming webhook payload", slog.String("body", string(body)))
+
 	var input dto.KeepAlertInput
 	if err := c.ShouldBindJSON(&input); err != nil {
+		h.logger.Error("Failed to parse webhook payload", slog.String("error", err.Error()))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}

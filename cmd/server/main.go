@@ -88,7 +88,7 @@ func main() {
 		log.With("component", "handle_callback_usecase"),
 	)
 
-	webhookHandler := handler.NewWebhookHandler(handleAlertUC)
+	webhookHandler := handler.NewWebhookHandler(handleAlertUC, log.With("component", "webhook_handler"))
 	callbackHandler := handler.NewCallbackHandler(handleCallbackUC)
 	healthHandler := handler.NewHealthHandler(postRepo)
 

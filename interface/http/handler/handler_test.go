@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,6 +17,10 @@ import (
 
 	"github.com/alexmorbo/keep-mattermost-bridge/application/dto"
 )
+
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
 
 type mockAlertExecutor struct {
 	executeFunc func(ctx context.Context, input dto.KeepAlertInput) error
@@ -66,7 +72,7 @@ func TestWebhookHandlerValidJSON(t *testing.T) {
 		},
 	}
 
-	handler := &WebhookHandler{handleAlert: mockUseCase}
+	handler := &WebhookHandler{handleAlert: mockUseCase, logger: testLogger()}
 
 	router := setupTestRouter()
 	router.POST("/webhook", handler.HandleAlert)
@@ -103,7 +109,7 @@ func TestWebhookHandlerValidJSON(t *testing.T) {
 
 func TestWebhookHandlerInvalidJSON(t *testing.T) {
 	mockUseCase := &mockAlertExecutor{}
-	handler := &WebhookHandler{handleAlert: mockUseCase}
+	handler := &WebhookHandler{handleAlert: mockUseCase, logger: testLogger()}
 
 	router := setupTestRouter()
 	router.POST("/webhook", handler.HandleAlert)
@@ -130,7 +136,7 @@ func TestWebhookHandlerUseCaseError(t *testing.T) {
 		},
 	}
 
-	handler := &WebhookHandler{handleAlert: mockUseCase}
+	handler := &WebhookHandler{handleAlert: mockUseCase, logger: testLogger()}
 
 	router := setupTestRouter()
 	router.POST("/webhook", handler.HandleAlert)
@@ -424,7 +430,7 @@ func TestWebhookHandlerMissingFields(t *testing.T) {
 		},
 	}
 
-	handler := &WebhookHandler{handleAlert: mockUseCase}
+	handler := &WebhookHandler{handleAlert: mockUseCase, logger: testLogger()}
 
 	router := setupTestRouter()
 	router.POST("/webhook", handler.HandleAlert)
@@ -453,7 +459,7 @@ func TestWebhookHandlerMissingFields(t *testing.T) {
 
 func TestWebhookHandlerEmptyBody(t *testing.T) {
 	mockUseCase := &mockAlertExecutor{}
-	handler := &WebhookHandler{handleAlert: mockUseCase}
+	handler := &WebhookHandler{handleAlert: mockUseCase, logger: testLogger()}
 
 	router := setupTestRouter()
 	router.POST("/webhook", handler.HandleAlert)
