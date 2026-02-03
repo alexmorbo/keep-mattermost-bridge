@@ -5,7 +5,6 @@ import (
 	"net/url"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/alexmorbo/keep-mattermost-bridge/application/port"
 	"github.com/alexmorbo/keep-mattermost-bridge/domain/alert"
@@ -66,13 +65,11 @@ func (b *Builder) BuildFiringAttachment(a *alert.Alert, callbackURL, keepUIURL s
 	}
 
 	return post.Attachment{
-		Color:      color,
-		Title:      title,
-		TitleLink:  titleLink,
-		Fields:     fields,
-		Actions:    buttons,
-		Footer:     b.msgConfig.FooterText() + " | " + time.Now().Format("2006-01-02 15:04:05 MST"),
-		FooterIcon: b.msgConfig.FooterIconURL(),
+		Color:     color,
+		Title:     title,
+		TitleLink: titleLink,
+		Fields:    fields,
+		Actions:   buttons,
 	}
 }
 
@@ -107,20 +104,12 @@ func (b *Builder) BuildAcknowledgedAttachment(a *alert.Alert, callbackURL, keepU
 		},
 	}
 
-	footer := fmt.Sprintf("%s | Acknowledged by @%s | %s",
-		b.msgConfig.FooterText(),
-		username,
-		time.Now().Format("2006-01-02 15:04:05 MST"),
-	)
-
 	return post.Attachment{
-		Color:      color,
-		Title:      title,
-		TitleLink:  titleLink,
-		Fields:     fields,
-		Actions:    buttons,
-		Footer:     footer,
-		FooterIcon: b.msgConfig.FooterIconURL(),
+		Color:     color,
+		Title:     title,
+		TitleLink: titleLink,
+		Fields:    fields,
+		Actions:   buttons,
 	}
 }
 
@@ -138,18 +127,11 @@ func (b *Builder) BuildResolvedAttachment(a *alert.Alert, keepUIURL string) post
 		}, fields...)
 	}
 
-	footer := fmt.Sprintf("%s | Resolved at %s",
-		b.msgConfig.FooterText(),
-		time.Now().Format("2006-01-02 15:04:05 MST"),
-	)
-
 	return post.Attachment{
-		Color:      color,
-		Title:      title,
-		TitleLink:  titleLink,
-		Fields:     fields,
-		Footer:     footer,
-		FooterIcon: b.msgConfig.FooterIconURL(),
+		Color:     color,
+		Title:     title,
+		TitleLink: titleLink,
+		Fields:    fields,
 	}
 }
 

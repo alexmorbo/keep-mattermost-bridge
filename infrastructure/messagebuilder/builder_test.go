@@ -155,8 +155,6 @@ func TestBuildFiringAttachment(t *testing.T) {
 				assert.Equal(t, "test-fingerprint-123", attachment.Actions[0].Integration.Context["fingerprint"])
 			}
 
-			assert.Contains(t, attachment.Footer, "Keep AIOps")
-			assert.Equal(t, "https://test.com/icon.png", attachment.FooterIcon)
 		})
 	}
 }
@@ -204,9 +202,6 @@ func TestBuildAcknowledgedAttachment(t *testing.T) {
 	assert.Len(t, attachment.Actions, 1, "should have only Resolve button")
 	assert.Equal(t, "resolve", attachment.Actions[0].ID)
 	assert.Equal(t, "Resolve", attachment.Actions[0].Name)
-
-	assert.Contains(t, attachment.Footer, "Acknowledged by @john.doe")
-	assert.Contains(t, attachment.Footer, "Keep AIOps")
 }
 
 func TestBuildResolvedAttachment(t *testing.T) {
@@ -250,9 +245,6 @@ func TestBuildResolvedAttachment(t *testing.T) {
 	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?fingerprint=resolved-fingerprint-789")
 
 	assert.Len(t, attachment.Actions, 0, "should have no buttons")
-
-	assert.Contains(t, attachment.Footer, "Resolved at")
-	assert.Contains(t, attachment.Footer, "Keep AIOps")
 }
 
 func TestBuildFieldsFiltering(t *testing.T) {
