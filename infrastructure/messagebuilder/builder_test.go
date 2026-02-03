@@ -2,6 +2,7 @@ package messagebuilder
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -135,6 +136,7 @@ func TestBuildFiringAttachment(t *testing.T) {
 				tt.alertDesc,
 				"prometheus",
 				tt.labels,
+				time.Time{},
 			)
 
 			attachment := builder.BuildFiringAttachment(testAlert, "http://callback.url", "http://keep.ui")
@@ -189,6 +191,7 @@ func TestBuildAcknowledgedAttachment(t *testing.T) {
 		"Test description",
 		"prometheus",
 		map[string]string{"env": "production"},
+		time.Time{},
 	)
 
 	attachment := builder.BuildAcknowledgedAttachment(testAlert, "http://callback.url", "http://keep.ui", "john.doe")
@@ -234,6 +237,7 @@ func TestBuildResolvedAttachment(t *testing.T) {
 		"This alert was resolved",
 		"prometheus",
 		map[string]string{"service": "api"},
+		time.Time{},
 	)
 
 	attachment := builder.BuildResolvedAttachment(testAlert, "http://keep.ui")
@@ -346,6 +350,7 @@ func TestBuildFieldsFiltering(t *testing.T) {
 				"",
 				"prometheus",
 				tt.inputLabels,
+				time.Time{},
 			)
 
 			attachment := builder.BuildFiringAttachment(testAlert, "http://callback.url", "http://keep.ui")
@@ -413,6 +418,7 @@ func TestDifferentSeveritiesProduceDifferentColorsAndEmojis(t *testing.T) {
 				"",
 				"prometheus",
 				map[string]string{},
+				time.Time{},
 			)
 
 			attachment := builder.BuildFiringAttachment(testAlert, "http://callback.url", "http://keep.ui")

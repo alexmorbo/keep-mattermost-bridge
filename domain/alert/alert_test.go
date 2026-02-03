@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -350,6 +351,7 @@ func TestNewAlert(t *testing.T) {
 			"Test description",
 			"prometheus",
 			labels,
+			time.Time{},
 		)
 
 		require.NoError(t, err)
@@ -376,6 +378,7 @@ func TestNewAlert(t *testing.T) {
 			"Description",
 			"source",
 			nil,
+			time.Time{},
 		)
 
 		require.NoError(t, err)
@@ -393,6 +396,7 @@ func TestNewAlert(t *testing.T) {
 			"Description",
 			"source",
 			nil,
+			time.Time{},
 		)
 
 		require.Error(t, err)
@@ -413,6 +417,7 @@ func TestNewAlert(t *testing.T) {
 			"Description",
 			"source",
 			originalLabels,
+			time.Time{},
 		)
 
 		require.NoError(t, err)
@@ -445,6 +450,7 @@ func TestRestoreAlert(t *testing.T) {
 			"Restored description",
 			"alertmanager",
 			labels,
+			time.Time{},
 		)
 
 		require.NotNil(t, alert)
@@ -466,6 +472,7 @@ func TestRestoreAlert(t *testing.T) {
 			"Description",
 			"source",
 			nil,
+			time.Time{},
 		)
 
 		labels := alert.Labels()
@@ -491,6 +498,7 @@ func TestAlertGetters(t *testing.T) {
 		"High connection count",
 		"custom-monitor",
 		labels,
+		time.Time{},
 	)
 
 	t.Run("fingerprint getter", func(t *testing.T) {

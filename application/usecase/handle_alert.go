@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/alexmorbo/keep-mattermost-bridge/application/dto"
 	"github.com/alexmorbo/keep-mattermost-bridge/application/port"
@@ -62,7 +63,12 @@ func (uc *HandleAlertUseCase) Execute(ctx context.Context, input dto.KeepAlertIn
 
 	source := strings.Join(input.Source, ", ")
 
-	a, err := alert.NewAlert(fingerprint, input.Name, severity, status, input.Description, source, input.Labels)
+	var firingStartTime time.Time
+	if input.FiringStartTime != "" {
+		firingStartTime, _ = time.Parse(time.RFC3339, input.FiringStartTime)
+	}
+
+	a, err := alert.NewAlert(fingerprint, input.Name, severity, status, input.Description, source, input.Labels, firingStartTime)
 	if err != nil {
 		return fmt.Errorf("create alert: %w", err)
 	}

@@ -97,6 +97,7 @@ func (uc *HandleCallbackUseCase) Execute(ctx context.Context, input dto.Mattermo
 		"",
 		"",
 		nil,
+		time.Time{},
 	)
 
 	switch action {

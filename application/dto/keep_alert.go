@@ -6,14 +6,15 @@ import (
 )
 
 type KeepAlertInput struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"        binding:"required"`
-	Status      string      `json:"status"      binding:"required"`
-	Severity    string      `json:"severity"    binding:"required"`
-	Source      FlexStrings `json:"source"`
-	Fingerprint string      `json:"fingerprint" binding:"required"`
-	Description string      `json:"description"`
-	Labels      FlexLabels  `json:"labels"`
+	ID              string      `json:"id"`
+	Name            string      `json:"name"            binding:"required"`
+	Status          string      `json:"status"          binding:"required"`
+	Severity        string      `json:"severity"        binding:"required"`
+	Source          FlexStrings `json:"source"`
+	Fingerprint     string      `json:"fingerprint"     binding:"required"`
+	Description     string      `json:"description"`
+	Labels          FlexLabels  `json:"labels"`
+	FiringStartTime string      `json:"firingStartTime"`
 }
 
 // FlexStrings handles both []string and Python list repr string like "['a', 'b']"

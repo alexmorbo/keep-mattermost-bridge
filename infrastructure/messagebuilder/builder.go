@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/alexmorbo/keep-mattermost-bridge/application/port"
 	"github.com/alexmorbo/keep-mattermost-bridge/domain/alert"
@@ -25,6 +26,9 @@ func (b *Builder) BuildFiringAttachment(a *alert.Alert, callbackURL, keepUIURL s
 	emoji := b.msgConfig.EmojiForSeverity(severity)
 
 	title := fmt.Sprintf("%s %s | %s", emoji, strings.ToUpper(severity), a.Name())
+	if duration := formatDuration(a.FiringStartTime()); duration != "" {
+		title = fmt.Sprintf("%s (%s)", title, duration)
+	}
 	titleLink := fmt.Sprintf("%s/alerts/feed?fingerprint=%s", keepUIURL, url.QueryEscape(a.Fingerprint().Value()))
 
 	fields := b.buildFields(a.Labels())
@@ -78,6 +82,9 @@ func (b *Builder) BuildAcknowledgedAttachment(a *alert.Alert, callbackURL, keepU
 	color := b.msgConfig.ColorForSeverity("acknowledged")
 
 	title := fmt.Sprintf("👀 ACKNOWLEDGED | %s", a.Name())
+	if duration := formatDuration(a.FiringStartTime()); duration != "" {
+		title = fmt.Sprintf("%s (%s)", title, duration)
+	}
 	titleLink := fmt.Sprintf("%s/alerts/feed?fingerprint=%s", keepUIURL, url.QueryEscape(a.Fingerprint().Value()))
 
 	fields := b.buildFields(a.Labels())
@@ -117,6 +124,9 @@ func (b *Builder) BuildResolvedAttachment(a *alert.Alert, keepUIURL string) post
 	color := b.msgConfig.ColorForSeverity("resolved")
 
 	title := fmt.Sprintf("✅ RESOLVED | %s", a.Name())
+	if duration := formatDuration(a.FiringStartTime()); duration != "" {
+		title = fmt.Sprintf("%s (%s)", title, duration)
+	}
 	titleLink := fmt.Sprintf("%s/alerts/feed?fingerprint=%s", keepUIURL, url.QueryEscape(a.Fingerprint().Value()))
 
 	fields := b.buildFields(a.Labels())
@@ -166,4 +176,30 @@ func (b *Builder) buildFields(labels map[string]string) []post.AttachmentField {
 	}
 
 	return fields
+}
+
+func formatDuration(start time.Time) string {
+	if start.IsZero() {
+		return ""
+	}
+
+	d := time.Since(start)
+	if d < 0 {
+		return ""
+	}
+
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+
+	switch {
+	case days > 0:
+		return fmt.Sprintf("%dd %dh", days, hours)
+	case hours > 0:
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	case minutes > 0:
+		return fmt.Sprintf("%dm", minutes)
+	default:
+		return "<1m"
+	}
 }
