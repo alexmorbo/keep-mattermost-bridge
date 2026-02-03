@@ -73,6 +73,7 @@ func (c *FileConfig) applyDefaults() {
 			"high":         "#FF6600",
 			"warning":      "#EDA200",
 			"info":         "#0066FF",
+			"low":          "#808080",
 			"acknowledged": "#FFA500",
 			"resolved":     "#00CC00",
 		}
@@ -83,6 +84,7 @@ func (c *FileConfig) applyDefaults() {
 			"high":     "🟠",
 			"warning":  "🟡",
 			"info":     "🔵",
+			"low":      "⚪",
 		}
 	}
 	if c.Message.Footer.Text == "" {

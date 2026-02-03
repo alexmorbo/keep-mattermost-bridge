@@ -14,6 +14,7 @@ const (
 	SeverityHigh     = "high"
 	SeverityWarning  = "warning"
 	SeverityInfo     = "info"
+	SeverityLow      = "low"
 )
 
 var validSeverities = map[string]bool{
@@ -21,6 +22,7 @@ var validSeverities = map[string]bool{
 	SeverityHigh:     true,
 	SeverityWarning:  true,
 	SeverityInfo:     true,
+	SeverityLow:      true,
 }
 
 func NewSeverity(value string) (Severity, error) {
