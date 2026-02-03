@@ -489,6 +489,7 @@ func TestAlertGetters(t *testing.T) {
 		"team": "platform",
 		"app":  "database",
 	}
+	firingTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
 
 	alert := RestoreAlert(
 		fingerprint,
@@ -498,7 +499,7 @@ func TestAlertGetters(t *testing.T) {
 		"High connection count",
 		"custom-monitor",
 		labels,
-		time.Time{},
+		firingTime,
 	)
 
 	t.Run("fingerprint getter", func(t *testing.T) {
@@ -539,5 +540,43 @@ func TestAlertGetters(t *testing.T) {
 		labels1["new"] = "value"
 		assert.Empty(t, labels2["new"])
 		assert.Empty(t, alert.Labels()["new"])
+	})
+
+	t.Run("firingStartTime getter", func(t *testing.T) {
+		assert.Equal(t, firingTime, alert.FiringStartTime())
+	})
+}
+
+func TestAlertFiringStartTime(t *testing.T) {
+	t.Run("returns zero time when not set", func(t *testing.T) {
+		alert := RestoreAlert(
+			RestoreFingerprint("fp-zero"),
+			"Alert",
+			RestoreSeverity(SeverityInfo),
+			RestoreStatus(StatusFiring),
+			"Description",
+			"source",
+			nil,
+			time.Time{},
+		)
+
+		assert.True(t, alert.FiringStartTime().IsZero())
+	})
+
+	t.Run("returns specific time when set", func(t *testing.T) {
+		expectedTime := time.Date(2024, 6, 15, 14, 30, 45, 0, time.UTC)
+		alert := RestoreAlert(
+			RestoreFingerprint("fp-time"),
+			"Alert",
+			RestoreSeverity(SeverityCritical),
+			RestoreStatus(StatusFiring),
+			"Description",
+			"source",
+			nil,
+			expectedTime,
+		)
+
+		assert.Equal(t, expectedTime, alert.FiringStartTime())
+		assert.False(t, alert.FiringStartTime().IsZero())
 	})
 }

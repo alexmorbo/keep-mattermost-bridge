@@ -428,3 +428,41 @@ func TestHandleCallbackUseCase_ResolveWithDifferentSeverities(t *testing.T) {
 		})
 	}
 }
+
+func TestHandleCallbackUseCase_Wait(t *testing.T) {
+	t.Run("wait completes after background goroutines finish", func(t *testing.T) {
+		uc, _, keepClient, _ := setupHandleCallbackUseCase()
+		ctx := context.Background()
+
+		input := dto.MattermostCallbackInput{
+			UserID: "user-123",
+			Context: map[string]string{
+				"action":      "acknowledge",
+				"fingerprint": "fp-12345",
+			},
+		}
+
+		_, err := uc.Execute(ctx, input)
+		require.NoError(t, err)
+
+		uc.Wait()
+
+		assert.True(t, keepClient.enrichAlertCalled)
+	})
+
+	t.Run("wait returns immediately when no goroutines pending", func(t *testing.T) {
+		uc, _, _, _ := setupHandleCallbackUseCase()
+
+		done := make(chan struct{})
+		go func() {
+			uc.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("Wait did not return immediately when no goroutines pending")
+		}
+	})
+}

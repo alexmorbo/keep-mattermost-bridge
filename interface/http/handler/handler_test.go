@@ -512,3 +512,32 @@ func TestCallbackHandlerMissingContext(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 }
+
+func TestNewCallbackHandler(t *testing.T) {
+	mockUseCase := &mockCallbackExecutor{}
+
+	handler := NewCallbackHandler(mockUseCase)
+
+	assert.NotNil(t, handler)
+	assert.Equal(t, mockUseCase, handler.handleCallback)
+}
+
+func TestNewWebhookHandler(t *testing.T) {
+	mockUseCase := &mockAlertExecutor{}
+	logger := testLogger()
+
+	handler := NewWebhookHandler(mockUseCase, logger)
+
+	assert.NotNil(t, handler)
+	assert.Equal(t, mockUseCase, handler.handleAlert)
+	assert.Equal(t, logger, handler.logger)
+}
+
+func TestNewHealthHandler(t *testing.T) {
+	mockRepo := &mockPostRepositoryPinger{}
+
+	handler := NewHealthHandler(mockRepo)
+
+	assert.NotNil(t, handler)
+	assert.Equal(t, mockRepo, handler.postRepo)
+}

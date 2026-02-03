@@ -514,6 +514,60 @@ func TestLoadFromEnvInvalidRedisDB(t *testing.T) {
 	assert.Contains(t, err.Error(), "REDIS_DB")
 }
 
+func TestFooterText(t *testing.T) {
+	t.Run("returns configured footer text", func(t *testing.T) {
+		cfg := &FileConfig{
+			Message: MessageConfig{
+				Footer: FooterConfig{
+					Text: "Custom Footer Text",
+				},
+			},
+		}
+
+		assert.Equal(t, "Custom Footer Text", cfg.FooterText())
+	})
+
+	t.Run("returns default footer text after applyDefaults", func(t *testing.T) {
+		cfg := &FileConfig{}
+		cfg.applyDefaults()
+
+		assert.Equal(t, "Keep AIOps", cfg.FooterText())
+	})
+
+	t.Run("returns empty string when not configured", func(t *testing.T) {
+		cfg := &FileConfig{}
+
+		assert.Equal(t, "", cfg.FooterText())
+	})
+}
+
+func TestFooterIconURL(t *testing.T) {
+	t.Run("returns configured footer icon URL", func(t *testing.T) {
+		cfg := &FileConfig{
+			Message: MessageConfig{
+				Footer: FooterConfig{
+					IconURL: "https://custom.example.com/icon.png",
+				},
+			},
+		}
+
+		assert.Equal(t, "https://custom.example.com/icon.png", cfg.FooterIconURL())
+	})
+
+	t.Run("returns default footer icon URL after applyDefaults", func(t *testing.T) {
+		cfg := &FileConfig{}
+		cfg.applyDefaults()
+
+		assert.Equal(t, "https://avatars.githubusercontent.com/u/109032290?v=4", cfg.FooterIconURL())
+	})
+
+	t.Run("returns empty string when not configured", func(t *testing.T) {
+		cfg := &FileConfig{}
+
+		assert.Equal(t, "", cfg.FooterIconURL())
+	})
+}
+
 func TestServerConfigAddr(t *testing.T) {
 	tests := []struct {
 		name         string

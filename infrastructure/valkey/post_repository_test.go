@@ -189,3 +189,60 @@ func TestNewPostRepository(t *testing.T) {
 	assert.NotNil(t, repo.client)
 	assert.NotNil(t, repo.logger)
 }
+
+func TestSaveRedisSetError(t *testing.T) {
+	repo, mr := setupTestRedis(t)
+	ctx := context.Background()
+
+	fingerprint := alert.RestoreFingerprint("fp-error")
+	p := post.NewPost("post-err", "channel-err", alert.RestoreFingerprint("fp-error"), "Error Test", alert.RestoreSeverity("critical"))
+
+	mr.Close()
+
+	err := repo.Save(ctx, fingerprint, p)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "redis set")
+}
+
+func TestFindByFingerprintRedisGetError(t *testing.T) {
+	repo, mr := setupTestRedis(t)
+	ctx := context.Background()
+
+	fingerprint := alert.RestoreFingerprint("fp-get-error")
+
+	mr.Close()
+
+	found, err := repo.FindByFingerprint(ctx, fingerprint)
+	require.Error(t, err)
+	assert.Nil(t, found)
+	assert.Contains(t, err.Error(), "redis get")
+	assert.NotErrorIs(t, err, post.ErrNotFound)
+}
+
+func TestFindByFingerprintUnmarshalError(t *testing.T) {
+	repo, mr := setupTestRedis(t)
+	ctx := context.Background()
+
+	fingerprint := alert.RestoreFingerprint("fp-corrupt")
+	key := keyPrefix + fingerprint.Value()
+
+	_ = mr.Set(key, "invalid-json-data")
+
+	found, err := repo.FindByFingerprint(ctx, fingerprint)
+	require.Error(t, err)
+	assert.Nil(t, found)
+	assert.Contains(t, err.Error(), "unmarshal post data")
+}
+
+func TestDeleteRedisDelError(t *testing.T) {
+	repo, mr := setupTestRedis(t)
+	ctx := context.Background()
+
+	fingerprint := alert.RestoreFingerprint("fp-del-error")
+
+	mr.Close()
+
+	err := repo.Delete(ctx, fingerprint)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "redis del")
+}

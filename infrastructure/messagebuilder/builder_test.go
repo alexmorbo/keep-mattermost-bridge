@@ -369,6 +369,62 @@ func TestBuildFieldsFiltering(t *testing.T) {
 	}
 }
 
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		name     string
+		start    time.Time
+		expected string
+	}{
+		{
+			name:     "zero time returns empty string",
+			start:    time.Time{},
+			expected: "",
+		},
+		{
+			name:     "future time returns empty string",
+			start:    time.Now().Add(1 * time.Hour),
+			expected: "",
+		},
+		{
+			name:     "less than 1 minute ago",
+			start:    time.Now().Add(-30 * time.Second),
+			expected: "<1m",
+		},
+		{
+			name:     "45 minutes ago",
+			start:    time.Now().Add(-45 * time.Minute),
+			expected: "45m",
+		},
+		{
+			name:     "2 hours 15 minutes ago",
+			start:    time.Now().Add(-2*time.Hour - 15*time.Minute),
+			expected: "2h 15m",
+		},
+		{
+			name:     "3 days 12 hours ago",
+			start:    time.Now().Add(-3*24*time.Hour - 12*time.Hour),
+			expected: "3d 12h",
+		},
+		{
+			name:     "exactly 1 hour",
+			start:    time.Now().Add(-1 * time.Hour),
+			expected: "1h 0m",
+		},
+		{
+			name:     "exactly 1 day",
+			start:    time.Now().Add(-24 * time.Hour),
+			expected: "1d 0h",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatDuration(tt.start)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestDifferentSeveritiesProduceDifferentColorsAndEmojis(t *testing.T) {
 	fileConfig := &config.FileConfig{
 		Message: config.MessageConfig{
