@@ -783,7 +783,7 @@ func TestCreateWorkflowSuccess(t *testing.T) {
 
 		file, _, err := r.FormFile("file")
 		require.NoError(t, err)
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		content, err := io.ReadAll(file)
 		require.NoError(t, err)
