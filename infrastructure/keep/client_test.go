@@ -580,10 +580,12 @@ func TestCreateWebhookProviderSuccess(t *testing.T) {
 	err := client.CreateWebhookProvider(context.Background(), config)
 	require.NoError(t, err)
 
-	assert.Equal(t, "/providers/install/webhook/mattermost-webhook", capturedPath)
+	assert.Equal(t, "/providers/install", capturedPath)
 	assert.Equal(t, "test-api-key", capturedAPIKey)
+	assert.Equal(t, "webhook", capturedRequest.ProviderType)
+	assert.Equal(t, "mattermost-webhook", capturedRequest.ProviderID)
 	assert.Equal(t, "mattermost-webhook", capturedRequest.ProviderName)
-	assert.Equal(t, "https://example.com/webhook", capturedRequest.WebhookURL)
+	assert.Equal(t, "https://example.com/webhook", capturedRequest.URL)
 	assert.Equal(t, "POST", capturedRequest.Method)
 	assert.True(t, capturedRequest.Verify)
 }

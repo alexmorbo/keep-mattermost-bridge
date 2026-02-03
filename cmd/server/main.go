@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -67,9 +68,11 @@ func main() {
 	keepClient := keep.NewClient(cfg.Keep.URL, cfg.Keep.APIKey, log.With("component", "keep_client"))
 
 	// Ensure Keep setup (provider and workflow)
+	// Webhook URL is derived from callback URL by replacing /callback with /webhook/alert
+	webhookURL := strings.Replace(cfg.CallbackURL, "/callback", "/webhook/alert", 1)
 	ensureSetupUC := usecase.NewEnsureKeepSetupUseCase(
 		keepClient,
-		cfg.CallbackURL+"/webhook/alert",
+		webhookURL,
 		log.With("component", "ensure_keep_setup"),
 	)
 

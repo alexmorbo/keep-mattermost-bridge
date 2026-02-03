@@ -336,19 +336,23 @@ func (c *Client) GetProviders(ctx context.Context) ([]port.KeepProvider, error) 
 }
 
 type webhookProviderRequest struct {
+	ProviderType string `json:"provider_type"`
+	ProviderID   string `json:"provider_id"`
 	ProviderName string `json:"provider_name"`
-	WebhookURL   string `json:"webhook_url"`
+	URL          string `json:"url"`
 	Method       string `json:"method"`
 	Verify       bool   `json:"verify"`
 }
 
 func (c *Client) CreateWebhookProvider(ctx context.Context, config port.WebhookProviderConfig) error {
 	start := time.Now()
-	reqURL := c.baseURL + "/providers/install/webhook/" + url.PathEscape(config.Name)
+	reqURL := c.baseURL + "/providers/install"
 
 	body := webhookProviderRequest{
+		ProviderType: "webhook",
+		ProviderID:   config.Name,
 		ProviderName: config.Name,
-		WebhookURL:   config.URL,
+		URL:          config.URL,
 		Method:       config.Method,
 		Verify:       config.Verify,
 	}
