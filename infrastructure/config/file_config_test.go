@@ -320,6 +320,8 @@ func TestApplyDefaults(t *testing.T) {
 	assert.Equal(t, "https://avatars.githubusercontent.com/u/109032290?v=4", cfg.Message.Footer.IconURL)
 
 	assert.NotNil(t, cfg.Labels.Rename)
+
+	assert.NotNil(t, cfg.Users.Mapping)
 }
 
 func TestDefaultFileConfig(t *testing.T) {
@@ -565,6 +567,50 @@ func TestFooterIconURL(t *testing.T) {
 		cfg := &FileConfig{}
 
 		assert.Equal(t, "", cfg.FooterIconURL())
+	})
+}
+
+func TestGetKeepUsername(t *testing.T) {
+	t.Run("returns mapped Keep username", func(t *testing.T) {
+		cfg := &FileConfig{
+			Users: UsersConfig{
+				Mapping: map[string]string{
+					"alexmorbo":    "alex.keep",
+					"another_user": "another.keep",
+				},
+			},
+		}
+
+		assert.Equal(t, "alex.keep", cfg.GetKeepUsername("alexmorbo"))
+		assert.Equal(t, "another.keep", cfg.GetKeepUsername("another_user"))
+	})
+
+	t.Run("returns empty string for unmapped user", func(t *testing.T) {
+		cfg := &FileConfig{
+			Users: UsersConfig{
+				Mapping: map[string]string{
+					"alexmorbo": "alex.keep",
+				},
+			},
+		}
+
+		assert.Equal(t, "", cfg.GetKeepUsername("unknown_user"))
+	})
+
+	t.Run("returns empty string when mapping is nil", func(t *testing.T) {
+		cfg := &FileConfig{}
+
+		assert.Equal(t, "", cfg.GetKeepUsername("alexmorbo"))
+	})
+
+	t.Run("returns empty string when mapping is empty", func(t *testing.T) {
+		cfg := &FileConfig{
+			Users: UsersConfig{
+				Mapping: map[string]string{},
+			},
+		}
+
+		assert.Equal(t, "", cfg.GetKeepUsername("alexmorbo"))
 	})
 }
 

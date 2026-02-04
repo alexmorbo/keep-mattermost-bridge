@@ -12,6 +12,7 @@ type FileConfig struct {
 	Channels ChannelsConfig `yaml:"channels"`
 	Message  MessageConfig  `yaml:"message"`
 	Labels   LabelsConfig   `yaml:"labels"`
+	Users    UsersConfig    `yaml:"users"`
 }
 
 type ChannelsConfig struct {
@@ -39,6 +40,10 @@ type LabelsConfig struct {
 	Display []string          `yaml:"display"`
 	Rename  map[string]string `yaml:"rename"`
 	Exclude []string          `yaml:"exclude"`
+}
+
+type UsersConfig struct {
+	Mapping map[string]string `yaml:"mapping"`
 }
 
 func LoadFromFile(path string) (*FileConfig, error) {
@@ -96,6 +101,9 @@ func (c *FileConfig) applyDefaults() {
 	if c.Labels.Rename == nil {
 		c.Labels.Rename = make(map[string]string)
 	}
+	if c.Users.Mapping == nil {
+		c.Users.Mapping = make(map[string]string)
+	}
 }
 
 func (c *FileConfig) ChannelIDForSeverity(severity string) string {
@@ -145,4 +153,11 @@ func (c *FileConfig) FooterText() string {
 
 func (c *FileConfig) FooterIconURL() string {
 	return c.Message.Footer.IconURL
+}
+
+func (c *FileConfig) GetKeepUsername(mattermostUsername string) string {
+	if keepUser, ok := c.Users.Mapping[mattermostUsername]; ok {
+		return keepUser
+	}
+	return ""
 }

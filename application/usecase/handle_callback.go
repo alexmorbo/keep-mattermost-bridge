@@ -20,6 +20,7 @@ type HandleCallbackUseCase struct {
 	keepClient  port.KeepClient
 	mmClient    port.MattermostClient
 	msgBuilder  port.MessageBuilder
+	userMapper  port.UserMapper
 	keepUIURL   string
 	callbackURL string
 	logger      *slog.Logger
@@ -31,6 +32,7 @@ func NewHandleCallbackUseCase(
 	keepClient port.KeepClient,
 	mmClient port.MattermostClient,
 	msgBuilder port.MessageBuilder,
+	userMapper port.UserMapper,
 	keepUIURL string,
 	callbackURL string,
 	logger *slog.Logger,
@@ -40,6 +42,7 @@ func NewHandleCallbackUseCase(
 		keepClient:  keepClient,
 		mmClient:    mmClient,
 		msgBuilder:  msgBuilder,
+		userMapper:  userMapper,
 		keepUIURL:   keepUIURL,
 		callbackURL: callbackURL,
 		logger:      logger,
@@ -121,12 +124,22 @@ func (uc *HandleCallbackUseCase) Execute(ctx context.Context, input dto.Mattermo
 
 func (uc *HandleCallbackUseCase) handleAcknowledge(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username string) (*dto.CallbackOutput, error) {
 	_ = ctx // ctx not needed for acknowledge, but kept for API consistency with handleResolve
+
+	enrichments := map[string]string{"status": "acknowledged"}
+	if keepUser := uc.userMapper.GetKeepUsername(username); keepUser != "" {
+		enrichments["assignee"] = keepUser
+		uc.logger.Debug("Mapped Mattermost user to Keep user",
+			slog.String("mattermost_user", username),
+			slog.String("keep_user", keepUser),
+		)
+	}
+
 	uc.wg.Add(1)
 	go func() {
 		defer uc.wg.Done()
 		enrichCtx, enrichCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer enrichCancel()
-		if err := uc.keepClient.EnrichAlert(enrichCtx, fingerprint.Value(), "acknowledged"); err != nil {
+		if err := uc.keepClient.EnrichAlert(enrichCtx, fingerprint.Value(), enrichments); err != nil {
 			uc.logger.Error("Failed to enrich alert in Keep",
 				slog.String("fingerprint", fingerprint.Value()),
 				slog.String("error", err.Error()),
@@ -152,12 +165,21 @@ func (uc *HandleCallbackUseCase) handleAcknowledge(ctx context.Context, a *alert
 }
 
 func (uc *HandleCallbackUseCase) handleResolve(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username string) (*dto.CallbackOutput, error) {
+	enrichments := map[string]string{"status": "resolved"}
+	if keepUser := uc.userMapper.GetKeepUsername(username); keepUser != "" {
+		enrichments["assignee"] = keepUser
+		uc.logger.Debug("Mapped Mattermost user to Keep user",
+			slog.String("mattermost_user", username),
+			slog.String("keep_user", keepUser),
+		)
+	}
+
 	uc.wg.Add(1)
 	go func() {
 		defer uc.wg.Done()
 		enrichCtx, enrichCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer enrichCancel()
-		if err := uc.keepClient.EnrichAlert(enrichCtx, fingerprint.Value(), "resolved"); err != nil {
+		if err := uc.keepClient.EnrichAlert(enrichCtx, fingerprint.Value(), enrichments); err != nil {
 			uc.logger.Error("Failed to enrich alert in Keep",
 				slog.String("fingerprint", fingerprint.Value()),
 				slog.String("error", err.Error()),

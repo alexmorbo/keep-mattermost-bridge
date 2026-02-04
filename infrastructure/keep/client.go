@@ -67,13 +67,13 @@ type unenrichRequest struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
-func (c *Client) EnrichAlert(ctx context.Context, fingerprint, status string) error {
+func (c *Client) EnrichAlert(ctx context.Context, fingerprint string, enrichments map[string]string) error {
 	start := time.Now()
 	reqURL := c.baseURL + "/alerts/enrich"
 
 	body := enrichRequest{
 		Fingerprint: fingerprint,
-		Enrichments: map[string]string{"status": status},
+		Enrichments: enrichments,
 	}
 
 	jsonBody, err := json.Marshal(body)

@@ -20,7 +20,7 @@ import (
 type mockKeepClient struct {
 	enrichAlertErr        error
 	enrichAlertCalled     bool
-	enrichedStatus        string
+	enrichedEnrichments   map[string]string
 	enrichedFingerprint   string
 	unenrichAlertErr      error
 	unenrichAlertCalled   bool
@@ -54,10 +54,10 @@ func newMockKeepClient() *mockKeepClient {
 	}
 }
 
-func (m *mockKeepClient) EnrichAlert(ctx context.Context, fingerprint, status string) error {
+func (m *mockKeepClient) EnrichAlert(ctx context.Context, fingerprint string, enrichments map[string]string) error {
 	m.enrichAlertCalled = true
 	m.enrichedFingerprint = fingerprint
-	m.enrichedStatus = status
+	m.enrichedEnrichments = enrichments
 	if m.enrichAlertErr != nil {
 		return m.enrichAlertErr
 	}
@@ -117,6 +117,23 @@ func (m *mockKeepClient) CreateWorkflow(ctx context.Context, config port.Workflo
 	return m.createWorkflowErr
 }
 
+type mockUserMapper struct {
+	mapping map[string]string
+}
+
+func newMockUserMapper() *mockUserMapper {
+	return &mockUserMapper{
+		mapping: make(map[string]string),
+	}
+}
+
+func (m *mockUserMapper) GetKeepUsername(mattermostUsername string) string {
+	if keepUser, ok := m.mapping[mattermostUsername]; ok {
+		return keepUser
+	}
+	return ""
+}
+
 type mockMattermostClientCallback struct {
 	getUserErr    error
 	getUserFunc   func(ctx context.Context, userID string) (string, error)
@@ -169,11 +186,12 @@ func (m *mockMessageBuilderCallback) BuildResolvedAttachment(a *alert.Alert, kee
 	}
 }
 
-func setupHandleCallbackUseCase() (*HandleCallbackUseCase, *mockPostRepository, *mockKeepClient, *mockMattermostClientCallback) {
+func setupHandleCallbackUseCase() (*HandleCallbackUseCase, *mockPostRepository, *mockKeepClient, *mockMattermostClientCallback, *mockUserMapper) {
 	postRepo := newMockPostRepository()
 	keepClient := newMockKeepClient()
 	mmClient := newMockMattermostClientCallback()
 	msgBuilder := &mockMessageBuilderCallback{}
+	userMapper := newMockUserMapper()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	uc := NewHandleCallbackUseCase(
@@ -181,16 +199,17 @@ func setupHandleCallbackUseCase() (*HandleCallbackUseCase, *mockPostRepository, 
 		keepClient,
 		mmClient,
 		msgBuilder,
+		userMapper,
 		"https://keep.example.com",
 		"https://callback.example.com",
 		logger,
 	)
 
-	return uc, postRepo, keepClient, mmClient
+	return uc, postRepo, keepClient, mmClient, userMapper
 }
 
 func TestHandleCallbackUseCase_Acknowledge(t *testing.T) {
-	uc, _, keepClient, _ := setupHandleCallbackUseCase()
+	uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
 	ctx := context.Background()
 
 	input := dto.MattermostCallbackInput{
@@ -208,14 +227,14 @@ func TestHandleCallbackUseCase_Acknowledge(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	assert.True(t, keepClient.enrichAlertCalled)
 	assert.Equal(t, "fp-12345", keepClient.enrichedFingerprint)
-	assert.Equal(t, "acknowledged", keepClient.enrichedStatus)
+	assert.Equal(t, "acknowledged", keepClient.enrichedEnrichments["status"])
 	assert.Contains(t, result.Ephemeral, "Alert acknowledged by @testuser")
 	assert.Equal(t, "#FFA500", result.Attachment.Color)
 	assert.Contains(t, result.Attachment.Title, "ACKNOWLEDGED")
 }
 
 func TestHandleCallbackUseCase_Resolve(t *testing.T) {
-	uc, postRepo, keepClient, _ := setupHandleCallbackUseCase()
+	uc, postRepo, keepClient, _, _ := setupHandleCallbackUseCase()
 	ctx := context.Background()
 
 	fp, _ := alert.NewFingerprint("fp-12345")
@@ -237,7 +256,7 @@ func TestHandleCallbackUseCase_Resolve(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	assert.True(t, keepClient.enrichAlertCalled)
 	assert.Equal(t, "fp-12345", keepClient.enrichedFingerprint)
-	assert.Equal(t, "resolved", keepClient.enrichedStatus)
+	assert.Equal(t, "resolved", keepClient.enrichedEnrichments["status"])
 	assert.True(t, postRepo.deleteCalled)
 	assert.Contains(t, result.Ephemeral, "Alert resolved by @testuser")
 	assert.Equal(t, "#00CC00", result.Attachment.Color)
@@ -248,7 +267,7 @@ func TestHandleCallbackUseCase_Resolve(t *testing.T) {
 }
 
 func TestHandleCallbackUseCase_MissingFingerprint(t *testing.T) {
-	uc, _, _, _ := setupHandleCallbackUseCase()
+	uc, _, _, _, _ := setupHandleCallbackUseCase()
 	ctx := context.Background()
 
 	input := dto.MattermostCallbackInput{
@@ -265,7 +284,7 @@ func TestHandleCallbackUseCase_MissingFingerprint(t *testing.T) {
 }
 
 func TestHandleCallbackUseCase_EmptyFingerprint(t *testing.T) {
-	uc, _, _, _ := setupHandleCallbackUseCase()
+	uc, _, _, _, _ := setupHandleCallbackUseCase()
 	ctx := context.Background()
 
 	input := dto.MattermostCallbackInput{
@@ -283,7 +302,7 @@ func TestHandleCallbackUseCase_EmptyFingerprint(t *testing.T) {
 }
 
 func TestHandleCallbackUseCase_InvalidSeverity(t *testing.T) {
-	uc, _, keepClient, _ := setupHandleCallbackUseCase()
+	uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
 	ctx := context.Background()
 
 	keepClient.getAlertResponse.Severity = "invalid"
@@ -303,7 +322,7 @@ func TestHandleCallbackUseCase_InvalidSeverity(t *testing.T) {
 }
 
 func TestHandleCallbackUseCase_GetAlertError(t *testing.T) {
-	uc, _, keepClient, _ := setupHandleCallbackUseCase()
+	uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
 	ctx := context.Background()
 
 	keepClient.getAlertErr = errors.New("keep api error")
@@ -323,7 +342,7 @@ func TestHandleCallbackUseCase_GetAlertError(t *testing.T) {
 }
 
 func TestHandleCallbackUseCase_EnrichAPIError(t *testing.T) {
-	uc, _, keepClient, _ := setupHandleCallbackUseCase()
+	uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
 	ctx := context.Background()
 
 	keepClient.enrichAlertErr = errors.New("keep api error")
@@ -346,7 +365,7 @@ func TestHandleCallbackUseCase_EnrichAPIError(t *testing.T) {
 }
 
 func TestHandleCallbackUseCase_PostNotFoundOnResolve(t *testing.T) {
-	uc, postRepo, keepClient, _ := setupHandleCallbackUseCase()
+	uc, postRepo, keepClient, _, _ := setupHandleCallbackUseCase()
 	ctx := context.Background()
 
 	input := dto.MattermostCallbackInput{
@@ -368,7 +387,7 @@ func TestHandleCallbackUseCase_PostNotFoundOnResolve(t *testing.T) {
 }
 
 func TestHandleCallbackUseCase_UnknownAction(t *testing.T) {
-	uc, _, _, _ := setupHandleCallbackUseCase()
+	uc, _, _, _, _ := setupHandleCallbackUseCase()
 	ctx := context.Background()
 
 	input := dto.MattermostCallbackInput{
@@ -386,7 +405,7 @@ func TestHandleCallbackUseCase_UnknownAction(t *testing.T) {
 }
 
 func TestHandleCallbackUseCase_GetUserError(t *testing.T) {
-	uc, _, keepClient, mmClient := setupHandleCallbackUseCase()
+	uc, _, keepClient, mmClient, _ := setupHandleCallbackUseCase()
 	ctx := context.Background()
 
 	mmClient.getUserErr = errors.New("user not found")
@@ -409,7 +428,7 @@ func TestHandleCallbackUseCase_GetUserError(t *testing.T) {
 }
 
 func TestHandleCallbackUseCase_ResolveDeleteError(t *testing.T) {
-	uc, postRepo, _, _ := setupHandleCallbackUseCase()
+	uc, postRepo, _, _, _ := setupHandleCallbackUseCase()
 	ctx := context.Background()
 
 	postRepo.deleteErr = errors.New("database error")
@@ -433,7 +452,7 @@ func TestHandleCallbackUseCase_AcknowledgeWithDifferentSeverities(t *testing.T) 
 
 	for _, severity := range severities {
 		t.Run("severity_"+severity, func(t *testing.T) {
-			uc, _, keepClient, _ := setupHandleCallbackUseCase()
+			uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
 			ctx := context.Background()
 
 			keepClient.getAlertResponse.Severity = severity
@@ -462,7 +481,7 @@ func TestHandleCallbackUseCase_ResolveWithDifferentSeverities(t *testing.T) {
 
 	for _, severity := range severities {
 		t.Run("severity_"+severity, func(t *testing.T) {
-			uc, _, keepClient, _ := setupHandleCallbackUseCase()
+			uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
 			ctx := context.Background()
 
 			keepClient.getAlertResponse.Severity = severity
@@ -488,7 +507,7 @@ func TestHandleCallbackUseCase_ResolveWithDifferentSeverities(t *testing.T) {
 
 func TestHandleCallbackUseCase_Wait(t *testing.T) {
 	t.Run("wait completes after background goroutines finish", func(t *testing.T) {
-		uc, _, keepClient, _ := setupHandleCallbackUseCase()
+		uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
 		ctx := context.Background()
 
 		input := dto.MattermostCallbackInput{
@@ -508,7 +527,7 @@ func TestHandleCallbackUseCase_Wait(t *testing.T) {
 	})
 
 	t.Run("wait returns immediately when no goroutines pending", func(t *testing.T) {
-		uc, _, _, _ := setupHandleCallbackUseCase()
+		uc, _, _, _, _ := setupHandleCallbackUseCase()
 
 		done := make(chan struct{})
 		go func() {
@@ -525,7 +544,7 @@ func TestHandleCallbackUseCase_Wait(t *testing.T) {
 }
 
 func TestHandleCallbackUseCase_Unacknowledge(t *testing.T) {
-	uc, _, keepClient, _ := setupHandleCallbackUseCase()
+	uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
 	ctx := context.Background()
 
 	input := dto.MattermostCallbackInput{
@@ -549,7 +568,7 @@ func TestHandleCallbackUseCase_Unacknowledge(t *testing.T) {
 }
 
 func TestHandleCallbackUseCase_UnacknowledgeAPIError(t *testing.T) {
-	uc, _, keepClient, _ := setupHandleCallbackUseCase()
+	uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
 	ctx := context.Background()
 
 	keepClient.unenrichAlertErr = errors.New("keep api error")
@@ -576,7 +595,7 @@ func TestHandleCallbackUseCase_UnacknowledgeWithDifferentSeverities(t *testing.T
 
 	for _, severity := range severities {
 		t.Run("severity_"+severity, func(t *testing.T) {
-			uc, _, keepClient, _ := setupHandleCallbackUseCase()
+			uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
 			ctx := context.Background()
 
 			keepClient.getAlertResponse.Severity = severity
@@ -598,4 +617,77 @@ func TestHandleCallbackUseCase_UnacknowledgeWithDifferentSeverities(t *testing.T
 			assert.Contains(t, result.Ephemeral, "Alert unacknowledged by @testuser")
 		})
 	}
+}
+
+func TestHandleCallbackUseCase_AcknowledgeWithUserMapping(t *testing.T) {
+	uc, _, keepClient, _, userMapper := setupHandleCallbackUseCase()
+	ctx := context.Background()
+
+	userMapper.mapping["testuser"] = "keep-user"
+
+	input := dto.MattermostCallbackInput{
+		UserID: "user-123",
+		Context: map[string]string{
+			"action":      "acknowledge",
+			"fingerprint": "fp-12345",
+		},
+	}
+
+	result, err := uc.Execute(ctx, input)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	time.Sleep(50 * time.Millisecond)
+	assert.True(t, keepClient.enrichAlertCalled)
+	assert.Equal(t, "fp-12345", keepClient.enrichedFingerprint)
+	assert.Equal(t, "acknowledged", keepClient.enrichedEnrichments["status"])
+	assert.Equal(t, "keep-user", keepClient.enrichedEnrichments["assignee"])
+}
+
+func TestHandleCallbackUseCase_ResolveWithUserMapping(t *testing.T) {
+	uc, _, keepClient, _, userMapper := setupHandleCallbackUseCase()
+	ctx := context.Background()
+
+	userMapper.mapping["testuser"] = "keep-user"
+
+	input := dto.MattermostCallbackInput{
+		UserID: "user-123",
+		Context: map[string]string{
+			"action":      "resolve",
+			"fingerprint": "fp-12345",
+		},
+	}
+
+	result, err := uc.Execute(ctx, input)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	time.Sleep(50 * time.Millisecond)
+	assert.True(t, keepClient.enrichAlertCalled)
+	assert.Equal(t, "fp-12345", keepClient.enrichedFingerprint)
+	assert.Equal(t, "resolved", keepClient.enrichedEnrichments["status"])
+	assert.Equal(t, "keep-user", keepClient.enrichedEnrichments["assignee"])
+}
+
+func TestHandleCallbackUseCase_AcknowledgeWithoutUserMapping(t *testing.T) {
+	uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
+	ctx := context.Background()
+
+	input := dto.MattermostCallbackInput{
+		UserID: "user-123",
+		Context: map[string]string{
+			"action":      "acknowledge",
+			"fingerprint": "fp-12345",
+		},
+	}
+
+	result, err := uc.Execute(ctx, input)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	time.Sleep(50 * time.Millisecond)
+	assert.True(t, keepClient.enrichAlertCalled)
+	assert.Equal(t, "acknowledged", keepClient.enrichedEnrichments["status"])
+	_, hasAssignee := keepClient.enrichedEnrichments["assignee"]
+	assert.False(t, hasAssignee, "should not have assignee when no mapping exists")
 }

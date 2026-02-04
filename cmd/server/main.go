@@ -99,6 +99,7 @@ func main() {
 		keepClient,
 		mmClient,
 		msgBuilder,
+		fileCfg,
 		cfg.Keep.UIURL,
 		cfg.CallbackURL,
 		log.With("component", "handle_callback_usecase"),
