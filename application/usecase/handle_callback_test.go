@@ -127,11 +127,9 @@ func newMockUserMapper() *mockUserMapper {
 	}
 }
 
-func (m *mockUserMapper) GetKeepUsername(mattermostUsername string) string {
-	if keepUser, ok := m.mapping[mattermostUsername]; ok {
-		return keepUser
-	}
-	return ""
+func (m *mockUserMapper) GetKeepUsername(mattermostUsername string) (string, bool) {
+	keepUser, ok := m.mapping[mattermostUsername]
+	return keepUser, ok
 }
 
 type mockMattermostClientCallback struct {
@@ -224,7 +222,7 @@ func TestHandleCallbackUseCase_Acknowledge(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	time.Sleep(50 * time.Millisecond)
+	uc.Wait()
 	assert.True(t, keepClient.enrichAlertCalled)
 	assert.Equal(t, "fp-12345", keepClient.enrichedFingerprint)
 	assert.Equal(t, "acknowledged", keepClient.enrichedEnrichments["status"])
@@ -253,7 +251,7 @@ func TestHandleCallbackUseCase_Resolve(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	time.Sleep(50 * time.Millisecond)
+	uc.Wait()
 	assert.True(t, keepClient.enrichAlertCalled)
 	assert.Equal(t, "fp-12345", keepClient.enrichedFingerprint)
 	assert.Equal(t, "resolved", keepClient.enrichedEnrichments["status"])
@@ -359,7 +357,7 @@ func TestHandleCallbackUseCase_EnrichAPIError(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	time.Sleep(50 * time.Millisecond)
+	uc.Wait()
 	assert.True(t, keepClient.enrichAlertCalled)
 	assert.Contains(t, result.Ephemeral, "Alert acknowledged by @testuser")
 }
@@ -380,7 +378,7 @@ func TestHandleCallbackUseCase_PostNotFoundOnResolve(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	time.Sleep(50 * time.Millisecond)
+	uc.Wait()
 	assert.True(t, keepClient.enrichAlertCalled)
 	assert.True(t, postRepo.deleteCalled)
 	assert.Contains(t, result.Ephemeral, "Alert resolved by @testuser")
@@ -422,7 +420,7 @@ func TestHandleCallbackUseCase_GetUserError(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	time.Sleep(50 * time.Millisecond)
+	uc.Wait()
 	assert.True(t, keepClient.enrichAlertCalled)
 	assert.Contains(t, result.Ephemeral, "user-123")
 }
@@ -469,7 +467,7 @@ func TestHandleCallbackUseCase_AcknowledgeWithDifferentSeverities(t *testing.T) 
 
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			time.Sleep(50 * time.Millisecond)
+			uc.Wait()
 			assert.True(t, keepClient.enrichAlertCalled)
 			assert.Contains(t, result.Ephemeral, "Alert acknowledged by @testuser")
 		})
@@ -498,7 +496,7 @@ func TestHandleCallbackUseCase_ResolveWithDifferentSeverities(t *testing.T) {
 
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			time.Sleep(50 * time.Millisecond)
+			uc.Wait()
 			assert.True(t, keepClient.enrichAlertCalled)
 			assert.Contains(t, result.Ephemeral, "Alert resolved by @testuser")
 		})
@@ -559,7 +557,7 @@ func TestHandleCallbackUseCase_Unacknowledge(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	time.Sleep(50 * time.Millisecond)
+	uc.Wait()
 	assert.True(t, keepClient.unenrichAlertCalled)
 	assert.Equal(t, "fp-12345", keepClient.unenrichFingerprint)
 	assert.Contains(t, result.Ephemeral, "Alert unacknowledged by @testuser")
@@ -585,7 +583,7 @@ func TestHandleCallbackUseCase_UnacknowledgeAPIError(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	time.Sleep(50 * time.Millisecond)
+	uc.Wait()
 	assert.True(t, keepClient.unenrichAlertCalled)
 	assert.Contains(t, result.Ephemeral, "Alert unacknowledged by @testuser")
 }
@@ -612,7 +610,7 @@ func TestHandleCallbackUseCase_UnacknowledgeWithDifferentSeverities(t *testing.T
 
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			time.Sleep(50 * time.Millisecond)
+			uc.Wait()
 			assert.True(t, keepClient.unenrichAlertCalled)
 			assert.Contains(t, result.Ephemeral, "Alert unacknowledged by @testuser")
 		})
@@ -637,7 +635,7 @@ func TestHandleCallbackUseCase_AcknowledgeWithUserMapping(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	time.Sleep(50 * time.Millisecond)
+	uc.Wait()
 	assert.True(t, keepClient.enrichAlertCalled)
 	assert.Equal(t, "fp-12345", keepClient.enrichedFingerprint)
 	assert.Equal(t, "acknowledged", keepClient.enrichedEnrichments["status"])
@@ -662,7 +660,7 @@ func TestHandleCallbackUseCase_ResolveWithUserMapping(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	time.Sleep(50 * time.Millisecond)
+	uc.Wait()
 	assert.True(t, keepClient.enrichAlertCalled)
 	assert.Equal(t, "fp-12345", keepClient.enrichedFingerprint)
 	assert.Equal(t, "resolved", keepClient.enrichedEnrichments["status"])
@@ -685,7 +683,7 @@ func TestHandleCallbackUseCase_AcknowledgeWithoutUserMapping(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	time.Sleep(50 * time.Millisecond)
+	uc.Wait()
 	assert.True(t, keepClient.enrichAlertCalled)
 	assert.Equal(t, "acknowledged", keepClient.enrichedEnrichments["status"])
 	_, hasAssignee := keepClient.enrichedEnrichments["assignee"]

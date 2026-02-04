@@ -68,6 +68,10 @@ type unenrichRequest struct {
 }
 
 func (c *Client) EnrichAlert(ctx context.Context, fingerprint string, enrichments map[string]string) error {
+	if enrichments == nil {
+		enrichments = make(map[string]string)
+	}
+
 	start := time.Now()
 	reqURL := c.baseURL + "/alerts/enrich"
 

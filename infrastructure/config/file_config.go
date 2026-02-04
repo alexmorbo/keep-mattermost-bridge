@@ -155,9 +155,10 @@ func (c *FileConfig) FooterIconURL() string {
 	return c.Message.Footer.IconURL
 }
 
-func (c *FileConfig) GetKeepUsername(mattermostUsername string) string {
-	if keepUser, ok := c.Users.Mapping[mattermostUsername]; ok {
-		return keepUser
+func (c *FileConfig) GetKeepUsername(mattermostUsername string) (string, bool) {
+	if c.Users.Mapping == nil {
+		return "", false
 	}
-	return ""
+	keepUser, ok := c.Users.Mapping[mattermostUsername]
+	return keepUser, ok
 }

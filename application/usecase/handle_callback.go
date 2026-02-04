@@ -122,17 +122,22 @@ func (uc *HandleCallbackUseCase) Execute(ctx context.Context, input dto.Mattermo
 	}
 }
 
-func (uc *HandleCallbackUseCase) handleAcknowledge(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username string) (*dto.CallbackOutput, error) {
-	_ = ctx // ctx not needed for acknowledge, but kept for API consistency with handleResolve
-
-	enrichments := map[string]string{"status": "acknowledged"}
-	if keepUser := uc.userMapper.GetKeepUsername(username); keepUser != "" {
-		enrichments["assignee"] = keepUser
+func (uc *HandleCallbackUseCase) buildEnrichments(status, mattermostUsername string) map[string]string {
+	enrichments := map[string]string{"status": status}
+	if keepUser, ok := uc.userMapper.GetKeepUsername(mattermostUsername); ok && keepUser != "" {
+		enrichments["assignee"] = strings.TrimSpace(keepUser)
 		uc.logger.Debug("Mapped Mattermost user to Keep user",
-			slog.String("mattermost_user", username),
+			slog.String("mattermost_user", mattermostUsername),
 			slog.String("keep_user", keepUser),
 		)
 	}
+	return enrichments
+}
+
+func (uc *HandleCallbackUseCase) handleAcknowledge(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username string) (*dto.CallbackOutput, error) {
+	_ = ctx // ctx not needed for acknowledge, but kept for API consistency with handleResolve
+
+	enrichments := uc.buildEnrichments("acknowledged", username)
 
 	uc.wg.Add(1)
 	go func() {
@@ -165,14 +170,7 @@ func (uc *HandleCallbackUseCase) handleAcknowledge(ctx context.Context, a *alert
 }
 
 func (uc *HandleCallbackUseCase) handleResolve(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username string) (*dto.CallbackOutput, error) {
-	enrichments := map[string]string{"status": "resolved"}
-	if keepUser := uc.userMapper.GetKeepUsername(username); keepUser != "" {
-		enrichments["assignee"] = keepUser
-		uc.logger.Debug("Mapped Mattermost user to Keep user",
-			slog.String("mattermost_user", username),
-			slog.String("keep_user", keepUser),
-		)
-	}
+	enrichments := uc.buildEnrichments("resolved", username)
 
 	uc.wg.Add(1)
 	go func() {
@@ -208,6 +206,8 @@ func (uc *HandleCallbackUseCase) handleResolve(ctx context.Context, a *alert.Ale
 	}, nil
 }
 
+// handleUnacknowledge removes all enrichments from the alert, including status and assignee.
+// This resets the alert to its original firing state without any user assignment.
 func (uc *HandleCallbackUseCase) handleUnacknowledge(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username string) (*dto.CallbackOutput, error) {
 	_ = ctx
 	uc.wg.Add(1)

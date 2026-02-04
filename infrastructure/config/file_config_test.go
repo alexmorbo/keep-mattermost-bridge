@@ -581,11 +581,16 @@ func TestGetKeepUsername(t *testing.T) {
 			},
 		}
 
-		assert.Equal(t, "alex.keep", cfg.GetKeepUsername("alexmorbo"))
-		assert.Equal(t, "another.keep", cfg.GetKeepUsername("another_user"))
+		keepUser, ok := cfg.GetKeepUsername("alexmorbo")
+		assert.True(t, ok)
+		assert.Equal(t, "alex.keep", keepUser)
+
+		keepUser, ok = cfg.GetKeepUsername("another_user")
+		assert.True(t, ok)
+		assert.Equal(t, "another.keep", keepUser)
 	})
 
-	t.Run("returns empty string for unmapped user", func(t *testing.T) {
+	t.Run("returns false for unmapped user", func(t *testing.T) {
 		cfg := &FileConfig{
 			Users: UsersConfig{
 				Mapping: map[string]string{
@@ -594,23 +599,72 @@ func TestGetKeepUsername(t *testing.T) {
 			},
 		}
 
-		assert.Equal(t, "", cfg.GetKeepUsername("unknown_user"))
+		keepUser, ok := cfg.GetKeepUsername("unknown_user")
+		assert.False(t, ok)
+		assert.Equal(t, "", keepUser)
 	})
 
-	t.Run("returns empty string when mapping is nil", func(t *testing.T) {
+	t.Run("returns false when mapping is nil", func(t *testing.T) {
 		cfg := &FileConfig{}
 
-		assert.Equal(t, "", cfg.GetKeepUsername("alexmorbo"))
+		keepUser, ok := cfg.GetKeepUsername("alexmorbo")
+		assert.False(t, ok)
+		assert.Equal(t, "", keepUser)
 	})
 
-	t.Run("returns empty string when mapping is empty", func(t *testing.T) {
+	t.Run("returns false when mapping is empty", func(t *testing.T) {
 		cfg := &FileConfig{
 			Users: UsersConfig{
 				Mapping: map[string]string{},
 			},
 		}
 
-		assert.Equal(t, "", cfg.GetKeepUsername("alexmorbo"))
+		keepUser, ok := cfg.GetKeepUsername("alexmorbo")
+		assert.False(t, ok)
+		assert.Equal(t, "", keepUser)
+	})
+
+	t.Run("returns true with empty string when explicitly mapped to empty", func(t *testing.T) {
+		cfg := &FileConfig{
+			Users: UsersConfig{
+				Mapping: map[string]string{
+					"alexmorbo": "",
+				},
+			},
+		}
+
+		keepUser, ok := cfg.GetKeepUsername("alexmorbo")
+		assert.True(t, ok)
+		assert.Equal(t, "", keepUser)
+	})
+
+	t.Run("handles special characters in username", func(t *testing.T) {
+		cfg := &FileConfig{
+			Users: UsersConfig{
+				Mapping: map[string]string{
+					"user.name":    "keep.user",
+					"user-name":    "keep-user",
+					"user_name":    "keep_user",
+					"user@domain":  "keepuser",
+				},
+			},
+		}
+
+		keepUser, ok := cfg.GetKeepUsername("user.name")
+		assert.True(t, ok)
+		assert.Equal(t, "keep.user", keepUser)
+
+		keepUser, ok = cfg.GetKeepUsername("user-name")
+		assert.True(t, ok)
+		assert.Equal(t, "keep-user", keepUser)
+
+		keepUser, ok = cfg.GetKeepUsername("user_name")
+		assert.True(t, ok)
+		assert.Equal(t, "keep_user", keepUser)
+
+		keepUser, ok = cfg.GetKeepUsername("user@domain")
+		assert.True(t, ok)
+		assert.Equal(t, "keepuser", keepUser)
 	})
 }
 

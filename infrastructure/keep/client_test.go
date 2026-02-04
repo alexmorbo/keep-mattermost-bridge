@@ -128,6 +128,28 @@ func TestEnrichAlertContextCanceled(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestEnrichAlertNilEnrichments(t *testing.T) {
+	var capturedRequest enrichRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		err = json.Unmarshal(body, &capturedRequest)
+		require.NoError(t, err)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client := NewClient(server.URL, "test-key", logger)
+
+	err := client.EnrichAlert(context.Background(), "fp-123", nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, "fp-123", capturedRequest.Fingerprint)
+	assert.NotNil(t, capturedRequest.Enrichments)
+}
+
 func TestNewClient(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	client := NewClient("https://keep.example.com", "api-key-123", logger)
