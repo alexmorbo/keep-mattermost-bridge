@@ -160,6 +160,7 @@ func (b *Builder) BuildResolvedAttachment(a *alert.Alert, keepUIURL string) post
 
 func (b *Builder) buildFields(labels map[string]string) []post.AttachmentField {
 	var fields []post.AttachmentField
+	var topologyLabels []string
 
 	keys := make([]string, 0, len(labels))
 	for k := range labels {
@@ -171,12 +172,20 @@ func (b *Builder) buildFields(labels map[string]string) []post.AttachmentField {
 		if b.msgConfig.IsLabelExcluded(key) {
 			continue
 		}
-		if !b.msgConfig.IsLabelDisplayed(key) {
-			continue
-		}
 
 		value := labels[key]
 		if value == "" {
+			continue
+		}
+
+		// Collect topology labels separately
+		if strings.HasPrefix(key, "topology_") || strings.Contains(key, "_topology_") {
+			displayKey := strings.ReplaceAll(key, "_", ".")
+			topologyLabels = append(topologyLabels, fmt.Sprintf("• %s: %s", displayKey, value))
+			continue
+		}
+
+		if !b.msgConfig.IsLabelDisplayed(key) {
 			continue
 		}
 
@@ -185,6 +194,15 @@ func (b *Builder) buildFields(labels map[string]string) []post.AttachmentField {
 			Title: displayName,
 			Value: value,
 			Short: true,
+		})
+	}
+
+	// Add topology section if there are any topology labels
+	if len(topologyLabels) > 0 {
+		fields = append(fields, post.AttachmentField{
+			Title: "Topology",
+			Value: strings.Join(topologyLabels, "\n"),
+			Short: false,
 		})
 	}
 
