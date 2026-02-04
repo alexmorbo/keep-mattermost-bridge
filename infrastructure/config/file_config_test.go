@@ -26,8 +26,8 @@ message:
     warning: "#FFFF00"
     info: "#00FF00"
   emoji:
-    critical: ":alert:"
-    high: ":fire:"
+    critical: "🚨"
+    high: "🔥"
   footer:
     text: "Custom Footer"
     icon_url: "https://custom.com/icon.png"
@@ -62,7 +62,7 @@ labels:
 	assert.Equal(t, "critical-alerts", cfg.Channels.Routing[0].ChannelID)
 
 	assert.Equal(t, "#FF0000", cfg.Message.Colors["critical"])
-	assert.Equal(t, ":alert:", cfg.Message.Emoji["critical"])
+	assert.Equal(t, "🚨", cfg.Message.Emoji["critical"])
 	assert.Equal(t, "Custom Footer", cfg.Message.Footer.Text)
 	assert.Equal(t, "https://custom.com/icon.png", cfg.Message.Footer.IconURL)
 
@@ -169,10 +169,10 @@ func TestEmojiForSeverity(t *testing.T) {
 	cfg := &FileConfig{
 		Message: MessageConfig{
 			Emoji: map[string]string{
-				"critical": ":rotating_light:",
-				"high":     ":fire:",
-				"warning":  ":warning:",
-				"info":     ":information_source:",
+				"critical": "🔴",
+				"high":     "🟠",
+				"warning":  "🟡",
+				"info":     "🔵",
 			},
 		},
 	}
@@ -181,10 +181,10 @@ func TestEmojiForSeverity(t *testing.T) {
 		severity      string
 		expectedEmoji string
 	}{
-		{"critical", ":rotating_light:"},
-		{"high", ":fire:"},
-		{"warning", ":warning:"},
-		{"info", ":information_source:"},
+		{"critical", "🔴"},
+		{"high", "🟠"},
+		{"warning", "🟡"},
+		{"info", "🔵"},
 		{"unknown", ""},
 		{"", ""},
 	}
