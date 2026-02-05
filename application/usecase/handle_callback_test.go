@@ -26,6 +26,7 @@ type mockKeepClient struct {
 	unenrichAlertErr      error
 	unenrichAlertCalled   bool
 	unenrichFingerprint   string
+	unenrichedEnrichments []string
 	getAlertErr           error
 	getAlertResponse      *port.KeepAlert
 	providers             []port.KeepProvider
@@ -83,15 +84,22 @@ func (m *mockKeepClient) GetAlert(ctx context.Context, fingerprint string) (*por
 	return &resp, nil
 }
 
-func (m *mockKeepClient) UnenrichAlert(ctx context.Context, fingerprint string) error {
+func (m *mockKeepClient) UnenrichAlert(ctx context.Context, fingerprint string, enrichments []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.unenrichAlertCalled = true
 	m.unenrichFingerprint = fingerprint
+	m.unenrichedEnrichments = enrichments
 	if m.unenrichAlertErr != nil {
 		return m.unenrichAlertErr
 	}
 	return nil
+}
+
+func (m *mockKeepClient) getUnenrichedEnrichments() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.unenrichedEnrichments
 }
 
 func (m *mockKeepClient) wasUnenrichAlertCalled() bool {
@@ -383,6 +391,7 @@ func TestHandleCallbackUseCase_ExecuteAsync_Unacknowledge(t *testing.T) {
 
 	assert.True(t, keepClient.wasUnenrichAlertCalled())
 	assert.Equal(t, "fp-12345", keepClient.unenrichFingerprint)
+	assert.ElementsMatch(t, []string{EnrichmentKeyStatus, EnrichmentKeyAssignee}, keepClient.getUnenrichedEnrichments())
 	assert.True(t, mmClient.wasUpdatePostCalled())
 	replies := mmClient.getReplyToThreadCalls()
 	require.Len(t, replies, 1)

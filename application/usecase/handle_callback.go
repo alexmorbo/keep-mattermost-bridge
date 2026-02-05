@@ -15,6 +15,11 @@ import (
 	"github.com/alexmorbo/keep-mattermost-bridge/pkg/logger"
 )
 
+const (
+	EnrichmentKeyStatus   = "status"
+	EnrichmentKeyAssignee = "assignee"
+)
+
 type HandleCallbackUseCase struct {
 	postRepo    post.Repository
 	keepClient  port.KeepClient
@@ -193,9 +198,9 @@ func (uc *HandleCallbackUseCase) updatePostWithError(ctx context.Context, postID
 }
 
 func (uc *HandleCallbackUseCase) buildEnrichments(status, mattermostUsername string) map[string]string {
-	enrichments := map[string]string{"status": status}
+	enrichments := map[string]string{EnrichmentKeyStatus: status}
 	if keepUser, ok := uc.userMapper.GetKeepUsername(mattermostUsername); ok && keepUser != "" {
-		enrichments["assignee"] = strings.TrimSpace(keepUser)
+		enrichments[EnrichmentKeyAssignee] = strings.TrimSpace(keepUser)
 		uc.logger.Debug("Mapped Mattermost user to Keep user",
 			slog.String("mattermost_user", mattermostUsername),
 			slog.String("keep_user", keepUser),
@@ -286,7 +291,8 @@ func (uc *HandleCallbackUseCase) handleResolveAsync(ctx context.Context, a *aler
 }
 
 func (uc *HandleCallbackUseCase) handleUnacknowledgeAsync(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username, postID, channelID string) {
-	if err := uc.keepClient.UnenrichAlert(ctx, fingerprint.Value()); err != nil {
+	enrichmentsToRemove := []string{EnrichmentKeyStatus, EnrichmentKeyAssignee}
+	if err := uc.keepClient.UnenrichAlert(ctx, fingerprint.Value(), enrichmentsToRemove); err != nil {
 		uc.logger.Error("Failed to unenrich alert in Keep",
 			slog.String("fingerprint", fingerprint.Value()),
 			slog.String("error", err.Error()),

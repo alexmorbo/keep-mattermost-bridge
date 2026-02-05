@@ -46,7 +46,7 @@ type WorkflowConfig struct {
 
 type KeepClient interface {
 	EnrichAlert(ctx context.Context, fingerprint string, enrichments map[string]string) error
-	UnenrichAlert(ctx context.Context, fingerprint string) error
+	UnenrichAlert(ctx context.Context, fingerprint string, enrichments []string) error
 	GetAlert(ctx context.Context, fingerprint string) (*KeepAlert, error)
 	GetProviders(ctx context.Context) ([]KeepProvider, error)
 	CreateWebhookProvider(ctx context.Context, config WebhookProviderConfig) error
