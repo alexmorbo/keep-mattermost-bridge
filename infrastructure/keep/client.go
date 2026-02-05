@@ -196,6 +196,8 @@ type alertResponse struct {
 	Enrichments     map[string]any `json:"enrichments"`
 	FiringStartTime string         `json:"firingStartTime"`
 	LastReceived    string         `json:"lastReceived"`
+	// Keep API returns assignee as top-level field, not inside enrichments
+	Assignee string `json:"assignee"`
 }
 
 func (c *Client) GetAlert(ctx context.Context, fingerprint string) (*port.KeepAlert, error) {
@@ -277,6 +279,10 @@ func (c *Client) GetAlert(ctx context.Context, fingerprint string) (*port.KeepAl
 		} else if v != nil {
 			enrichments[k] = fmt.Sprintf("%v", v)
 		}
+	}
+	// Keep API returns assignee as top-level field, add it to enrichments for consistency
+	if alertResp.Assignee != "" {
+		enrichments["assignee"] = alertResp.Assignee
 	}
 
 	return &port.KeepAlert{

@@ -354,6 +354,74 @@ func TestGetAlertWithoutEnrichments(t *testing.T) {
 	assert.Empty(t, alert.Enrichments)
 }
 
+func TestGetAlertWithTopLevelAssignee(t *testing.T) {
+	// Keep API returns assignee as top-level field when enrichments map is null
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]any{
+			"fingerprint":     "fp-123",
+			"name":            "TestAlert",
+			"status":          "acknowledged",
+			"severity":        "high",
+			"description":     "Test description",
+			"source":          []string{"prometheus"},
+			"labels":          map[string]any{"env": "prod"},
+			"enrichments":     nil, // null, not populated
+			"assignee":        "john.doe@keep.local",
+			"enriched_fields": []string{"assignee", "status"},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client := NewClient(server.URL, "test-key", logger)
+
+	alert, err := client.GetAlert(context.Background(), "fp-123")
+	require.NoError(t, err)
+	require.NotNil(t, alert)
+
+	// Verify top-level assignee is copied to enrichments
+	assert.Equal(t, "john.doe@keep.local", alert.Enrichments["assignee"])
+}
+
+func TestGetAlertWithBothEnrichmentsAndTopLevelAssignee(t *testing.T) {
+	// When both enrichments map and top-level assignee exist, top-level takes precedence
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]any{
+			"fingerprint": "fp-123",
+			"name":        "TestAlert",
+			"status":      "acknowledged",
+			"severity":    "high",
+			"description": "Test description",
+			"source":      []string{"prometheus"},
+			"labels":      map[string]any{"env": "prod"},
+			"enrichments": map[string]any{
+				"assignee": "old.user@keep.local",
+				"status":   "acknowledged",
+			},
+			"assignee": "new.user@keep.local", // top-level should override
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client := NewClient(server.URL, "test-key", logger)
+
+	alert, err := client.GetAlert(context.Background(), "fp-123")
+	require.NoError(t, err)
+	require.NotNil(t, alert)
+
+	// Top-level assignee should take precedence
+	assert.Equal(t, "new.user@keep.local", alert.Enrichments["assignee"])
+	// Other enrichments should still be present
+	assert.Equal(t, "acknowledged", alert.Enrichments["status"])
+}
+
 func TestGetAlertLabelsWithNonStringValues(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]any{
