@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -101,7 +102,9 @@ func (m *mockMattermostClient) ReplyToThread(ctx context.Context, channelID, roo
 	return nil
 }
 
-type mockMessageBuilder struct{}
+type mockMessageBuilder struct {
+	lastResolvedAlert *alert.Alert
+}
 
 func (m *mockMessageBuilder) BuildFiringAttachment(a *alert.Alert, callbackURL, keepUIURL string) post.Attachment {
 	return post.Attachment{
@@ -118,6 +121,7 @@ func (m *mockMessageBuilder) BuildAcknowledgedAttachment(a *alert.Alert, callbac
 }
 
 func (m *mockMessageBuilder) BuildResolvedAttachment(a *alert.Alert, keepUIURL string) post.Attachment {
+	m.lastResolvedAlert = a
 	return post.Attachment{
 		Color: "#00CC00",
 		Title: "RESOLVED: " + a.Name(),
@@ -151,7 +155,7 @@ func (m *mockChannelResolver) ChannelIDForSeverity(severity string) string {
 	return m.channel
 }
 
-func setupHandleAlertUseCase() (*HandleAlertUseCase, *mockPostRepository, *mockMattermostClient) {
+func setupHandleAlertUseCase() (*HandleAlertUseCase, *mockPostRepository, *mockMattermostClient, *mockMessageBuilder) {
 	postRepo := newMockPostRepository()
 	mmClient := newMockMattermostClient()
 	msgBuilder := &mockMessageBuilder{}
@@ -168,11 +172,11 @@ func setupHandleAlertUseCase() (*HandleAlertUseCase, *mockPostRepository, *mockM
 		logger,
 	)
 
-	return uc, postRepo, mmClient
+	return uc, postRepo, mmClient, msgBuilder
 }
 
 func TestHandleAlertUseCase_NewFiringAlert(t *testing.T) {
-	uc, postRepo, mmClient := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -203,11 +207,11 @@ func TestHandleAlertUseCase_NewFiringAlert(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_RefireExistingAlert(t *testing.T) {
-	uc, postRepo, mmClient := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	fp, _ := alert.NewFingerprint("fp-12345")
-	existingPost := post.NewPost("existing-post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"))
+	existingPost := post.NewPost("existing-post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"), time.Now())
 	postRepo.posts[fp.Value()] = existingPost
 
 	input := dto.KeepAlertInput{
@@ -230,11 +234,11 @@ func TestHandleAlertUseCase_RefireExistingAlert(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_ResolveExistingAlert(t *testing.T) {
-	uc, postRepo, mmClient := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	fp, _ := alert.NewFingerprint("fp-12345")
-	existingPost := post.NewPost("existing-post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"))
+	existingPost := post.NewPost("existing-post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"), time.Now())
 	postRepo.posts[fp.Value()] = existingPost
 
 	input := dto.KeepAlertInput{
@@ -259,7 +263,7 @@ func TestHandleAlertUseCase_ResolveExistingAlert(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_ResolveWithoutExistingPost(t *testing.T) {
-	uc, postRepo, mmClient := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -280,7 +284,7 @@ func TestHandleAlertUseCase_ResolveWithoutExistingPost(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_InvalidFingerprint(t *testing.T) {
-	uc, _, _ := setupHandleAlertUseCase()
+	uc, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -300,7 +304,7 @@ func TestHandleAlertUseCase_InvalidFingerprint(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_InvalidSeverity(t *testing.T) {
-	uc, _, _ := setupHandleAlertUseCase()
+	uc, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -320,7 +324,7 @@ func TestHandleAlertUseCase_InvalidSeverity(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_MattermostCreatePostError(t *testing.T) {
-	uc, _, mmClient := setupHandleAlertUseCase()
+	uc, _, mmClient, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	mmClient.createPostErr = errors.New("mattermost error")
@@ -342,7 +346,7 @@ func TestHandleAlertUseCase_MattermostCreatePostError(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_LabelParsingWithPythonDict(t *testing.T) {
-	uc, postRepo, mmClient := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -363,7 +367,7 @@ func TestHandleAlertUseCase_LabelParsingWithPythonDict(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_InvalidLabelsDoesNotFailAlert(t *testing.T) {
-	uc, postRepo, mmClient := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -384,7 +388,7 @@ func TestHandleAlertUseCase_InvalidLabelsDoesNotFailAlert(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_RepositorySaveError(t *testing.T) {
-	uc, postRepo, _ := setupHandleAlertUseCase()
+	uc, postRepo, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	postRepo.saveErr = errors.New("database error")
@@ -406,11 +410,11 @@ func TestHandleAlertUseCase_RepositorySaveError(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_RepositoryDeleteError(t *testing.T) {
-	uc, postRepo, _ := setupHandleAlertUseCase()
+	uc, postRepo, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	fp, _ := alert.NewFingerprint("fp-12345")
-	existingPost := post.NewPost("existing-post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"))
+	existingPost := post.NewPost("existing-post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"), time.Now())
 	postRepo.posts[fp.Value()] = existingPost
 	postRepo.deleteErr = errors.New("database error")
 
@@ -431,7 +435,7 @@ func TestHandleAlertUseCase_RepositoryDeleteError(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_AcknowledgedStatusIsIgnored(t *testing.T) {
-	uc, postRepo, mmClient := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -451,4 +455,37 @@ func TestHandleAlertUseCase_AcknowledgedStatusIsIgnored(t *testing.T) {
 	assert.False(t, mmClient.updatePostCalled)
 	assert.False(t, postRepo.saveCalled)
 	assert.False(t, postRepo.deleteCalled)
+}
+
+func TestHandleAlertUseCase_ResolveUsesStoredFiringStartTime(t *testing.T) {
+	uc, postRepo, mmClient, msgBuilder := setupHandleAlertUseCase()
+	ctx := context.Background()
+
+	// Create post with specific firingStartTime
+	storedFiringTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	fp, _ := alert.NewFingerprint("fp-12345")
+	existingPost := post.NewPost("existing-post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"), storedFiringTime)
+	postRepo.posts[fp.Value()] = existingPost
+
+	// Resolve alert comes with empty firingStartTime (as Keep does)
+	input := dto.KeepAlertInput{
+		Fingerprint:     "fp-12345",
+		Name:            "Test Alert",
+		Severity:        "high",
+		Status:          "resolved",
+		Description:     "Test description",
+		Source:          []string{"prometheus"},
+		Labels:          map[string]string{},
+		FiringStartTime: "", // Empty - as Keep sends for resolved alerts
+	}
+
+	err := uc.Execute(ctx, input)
+
+	require.NoError(t, err)
+	assert.True(t, mmClient.updatePostCalled)
+
+	// Verify that BuildResolvedAttachment received alert with stored firingStartTime
+	require.NotNil(t, msgBuilder.lastResolvedAlert, "BuildResolvedAttachment should have been called")
+	assert.Equal(t, storedFiringTime, msgBuilder.lastResolvedAlert.FiringStartTime(),
+		"resolved alert should use firingStartTime from stored post, not from incoming alert")
 }

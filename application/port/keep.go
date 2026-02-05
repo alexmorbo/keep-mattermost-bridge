@@ -44,8 +44,12 @@ type WorkflowConfig struct {
 	Workflow    string
 }
 
+type EnrichOptions struct {
+	DisposeOnNewAlert bool
+}
+
 type KeepClient interface {
-	EnrichAlert(ctx context.Context, fingerprint string, enrichments map[string]string) error
+	EnrichAlert(ctx context.Context, fingerprint string, enrichments map[string]string, opts EnrichOptions) error
 	UnenrichAlert(ctx context.Context, fingerprint string, enrichments []string) error
 	GetAlert(ctx context.Context, fingerprint string) (*KeepAlert, error)
 	GetProviders(ctx context.Context) ([]KeepProvider, error)

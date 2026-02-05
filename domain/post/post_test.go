@@ -17,9 +17,10 @@ func TestNewPost(t *testing.T) {
 	fingerprint := alert.RestoreFingerprint("fp-789")
 	alertName := "Test Alert"
 	severity := alert.RestoreSeverity("critical")
+	firingStartTime := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)
 
 	beforeCreate := time.Now()
-	p := NewPost(postID, channelID, fingerprint, alertName, severity)
+	p := NewPost(postID, channelID, fingerprint, alertName, severity, firingStartTime)
 	afterCreate := time.Now()
 
 	require.NotNil(t, p)
@@ -28,6 +29,7 @@ func TestNewPost(t *testing.T) {
 	assert.Equal(t, fingerprint, p.Fingerprint())
 	assert.Equal(t, alertName, p.AlertName())
 	assert.Equal(t, severity, p.Severity())
+	assert.Equal(t, firingStartTime, p.FiringStartTime())
 
 	// Timestamps should be set to approximately now
 	assert.True(t, p.CreatedAt().After(beforeCreate) || p.CreatedAt().Equal(beforeCreate))
@@ -46,10 +48,11 @@ func TestRestorePost(t *testing.T) {
 	fingerprint := alert.RestoreFingerprint("fp-ghi")
 	alertName := "Restored Alert"
 	severity := alert.RestoreSeverity("high")
+	firingStartTime := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)
 	createdAt := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	lastUpdated := time.Date(2024, 1, 2, 14, 30, 0, 0, time.UTC)
 
-	p := RestorePost(postID, channelID, fingerprint, alertName, severity, createdAt, lastUpdated)
+	p := RestorePost(postID, channelID, fingerprint, alertName, severity, firingStartTime, createdAt, lastUpdated)
 
 	require.NotNil(t, p)
 	assert.Equal(t, postID, p.PostID())
@@ -57,15 +60,17 @@ func TestRestorePost(t *testing.T) {
 	assert.Equal(t, fingerprint, p.Fingerprint())
 	assert.Equal(t, alertName, p.AlertName())
 	assert.Equal(t, severity, p.Severity())
+	assert.Equal(t, firingStartTime, p.FiringStartTime())
 	assert.Equal(t, createdAt, p.CreatedAt())
 	assert.Equal(t, lastUpdated, p.LastUpdated())
 }
 
 func TestPostTouch(t *testing.T) {
+	firingStartTime := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)
 	createdAt := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	lastUpdated := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 
-	p := RestorePost("post-1", "channel-1", alert.RestoreFingerprint("fp-1"), "Alert", alert.RestoreSeverity("info"), createdAt, lastUpdated)
+	p := RestorePost("post-1", "channel-1", alert.RestoreFingerprint("fp-1"), "Alert", alert.RestoreSeverity("info"), firingStartTime, createdAt, lastUpdated)
 
 	// Verify initial state
 	assert.Equal(t, createdAt, p.CreatedAt())
@@ -94,10 +99,11 @@ func TestPostGetters(t *testing.T) {
 	fingerprint := alert.RestoreFingerprint("fp-rst")
 	alertName := "Database Alert"
 	severity := alert.RestoreSeverity("warning")
+	firingStartTime := time.Date(2024, 6, 15, 9, 0, 0, 0, time.UTC)
 	createdAt := time.Date(2024, 6, 15, 10, 30, 0, 0, time.UTC)
 	lastUpdated := time.Date(2024, 6, 15, 11, 45, 0, 0, time.UTC)
 
-	p := RestorePost(postID, channelID, fingerprint, alertName, severity, createdAt, lastUpdated)
+	p := RestorePost(postID, channelID, fingerprint, alertName, severity, firingStartTime, createdAt, lastUpdated)
 
 	t.Run("PostID getter", func(t *testing.T) {
 		assert.Equal(t, postID, p.PostID())

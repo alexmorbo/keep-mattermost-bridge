@@ -197,27 +197,36 @@ func (uc *HandleCallbackUseCase) updatePostWithError(ctx context.Context, postID
 	}
 }
 
-func (uc *HandleCallbackUseCase) buildEnrichments(status, mattermostUsername string) map[string]string {
-	enrichments := map[string]string{EnrichmentKeyStatus: status}
+func (uc *HandleCallbackUseCase) enrichAssignee(ctx context.Context, fingerprint, mattermostUsername string) {
 	if keepUser, ok := uc.userMapper.GetKeepUsername(mattermostUsername); ok && keepUser != "" {
-		enrichments[EnrichmentKeyAssignee] = strings.TrimSpace(keepUser)
+		assigneeEnrichment := map[string]string{EnrichmentKeyAssignee: strings.TrimSpace(keepUser)}
+		// Assignee enrichment persists across alert updates (DisposeOnNewAlert=false)
+		if err := uc.keepClient.EnrichAlert(ctx, fingerprint, assigneeEnrichment, port.EnrichOptions{DisposeOnNewAlert: false}); err != nil {
+			uc.logger.Error("Failed to enrich assignee in Keep",
+				slog.String("fingerprint", fingerprint),
+				slog.String("error", err.Error()),
+			)
+		}
 		uc.logger.Debug("Mapped Mattermost user to Keep user",
 			slog.String("mattermost_user", mattermostUsername),
 			slog.String("keep_user", keepUser),
 		)
 	}
-	return enrichments
 }
 
 func (uc *HandleCallbackUseCase) handleAcknowledgeAsync(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username, postID, channelID string) {
-	enrichments := uc.buildEnrichments("acknowledged", username)
-
-	if err := uc.keepClient.EnrichAlert(ctx, fingerprint.Value(), enrichments); err != nil {
-		uc.logger.Error("Failed to enrich alert in Keep",
+	// Status enrichment auto-clears when alert re-fires from provider (DisposeOnNewAlert=true)
+	// This ensures resolved alerts from provider override acknowledged status
+	statusEnrichment := map[string]string{EnrichmentKeyStatus: "acknowledged"}
+	if err := uc.keepClient.EnrichAlert(ctx, fingerprint.Value(), statusEnrichment, port.EnrichOptions{DisposeOnNewAlert: true}); err != nil {
+		// Log error but continue - Mattermost UI update should proceed even if Keep enrichment fails
+		uc.logger.Error("Failed to enrich status in Keep",
 			slog.String("fingerprint", fingerprint.Value()),
 			slog.String("error", err.Error()),
 		)
 	}
+
+	uc.enrichAssignee(ctx, fingerprint.Value(), username)
 
 	attachment := uc.msgBuilder.BuildAcknowledgedAttachment(a, uc.callbackURL, uc.keepUIURL, username)
 
@@ -247,14 +256,17 @@ func (uc *HandleCallbackUseCase) handleAcknowledgeAsync(ctx context.Context, a *
 }
 
 func (uc *HandleCallbackUseCase) handleResolveAsync(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username, postID, channelID string) {
-	enrichments := uc.buildEnrichments("resolved", username)
-
-	if err := uc.keepClient.EnrichAlert(ctx, fingerprint.Value(), enrichments); err != nil {
-		uc.logger.Error("Failed to enrich alert in Keep",
+	// Status enrichment for manual resolve (DisposeOnNewAlert=true for consistency)
+	statusEnrichment := map[string]string{EnrichmentKeyStatus: "resolved"}
+	if err := uc.keepClient.EnrichAlert(ctx, fingerprint.Value(), statusEnrichment, port.EnrichOptions{DisposeOnNewAlert: true}); err != nil {
+		// Log error but continue - Mattermost UI update should proceed even if Keep enrichment fails
+		uc.logger.Error("Failed to enrich status in Keep",
 			slog.String("fingerprint", fingerprint.Value()),
 			slog.String("error", err.Error()),
 		)
 	}
+
+	uc.enrichAssignee(ctx, fingerprint.Value(), username)
 
 	attachment := uc.msgBuilder.BuildResolvedAttachment(a, uc.keepUIURL)
 

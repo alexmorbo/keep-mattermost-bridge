@@ -36,13 +36,14 @@ var (
 )
 
 type postData struct {
-	PostID      string    `json:"post_id"`
-	ChannelID   string    `json:"channel_id"`
-	Fingerprint string    `json:"fingerprint"`
-	AlertName   string    `json:"alert_name"`
-	Severity    string    `json:"severity"`
-	CreatedAt   time.Time `json:"created_at"`
-	LastUpdated time.Time `json:"last_updated"`
+	PostID          string    `json:"post_id"`
+	ChannelID       string    `json:"channel_id"`
+	Fingerprint     string    `json:"fingerprint"`
+	AlertName       string    `json:"alert_name"`
+	Severity        string    `json:"severity"`
+	FiringStartTime time.Time `json:"firing_start_time"`
+	CreatedAt       time.Time `json:"created_at"`
+	LastUpdated     time.Time `json:"last_updated"`
 }
 
 type PostRepository struct {
@@ -62,13 +63,14 @@ func (r *PostRepository) Save(ctx context.Context, fingerprint alert.Fingerprint
 	start := time.Now()
 
 	data := postData{
-		PostID:      p.PostID(),
-		ChannelID:   p.ChannelID(),
-		Fingerprint: p.Fingerprint().Value(),
-		AlertName:   p.AlertName(),
-		Severity:    p.Severity().String(),
-		CreatedAt:   p.CreatedAt(),
-		LastUpdated: p.LastUpdated(),
+		PostID:          p.PostID(),
+		ChannelID:       p.ChannelID(),
+		Fingerprint:     p.Fingerprint().Value(),
+		AlertName:       p.AlertName(),
+		Severity:        p.Severity().String(),
+		FiringStartTime: p.FiringStartTime(),
+		CreatedAt:       p.CreatedAt(),
+		LastUpdated:     p.LastUpdated(),
 	}
 
 	jsonData, err := json.Marshal(data)
@@ -134,6 +136,7 @@ func (r *PostRepository) FindByFingerprint(ctx context.Context, fingerprint aler
 		alert.RestoreFingerprint(data.Fingerprint),
 		data.AlertName,
 		alert.RestoreSeverity(data.Severity),
+		data.FiringStartTime,
 		data.CreatedAt,
 		data.LastUpdated,
 	), nil

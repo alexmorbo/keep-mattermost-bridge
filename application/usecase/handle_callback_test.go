@@ -18,11 +18,18 @@ import (
 	"github.com/alexmorbo/keep-mattermost-bridge/domain/post"
 )
 
+type enrichCall struct {
+	Fingerprint       string
+	Enrichments       map[string]string
+	DisposeOnNewAlert bool
+}
+
 type mockKeepClient struct {
 	enrichAlertErr        error
 	enrichAlertCalled     bool
 	enrichedEnrichments   map[string]string
 	enrichedFingerprint   string
+	enrichCalls           []enrichCall
 	unenrichAlertErr      error
 	unenrichAlertCalled   bool
 	unenrichFingerprint   string
@@ -57,12 +64,27 @@ func newMockKeepClient() *mockKeepClient {
 	}
 }
 
-func (m *mockKeepClient) EnrichAlert(ctx context.Context, fingerprint string, enrichments map[string]string) error {
+func (m *mockKeepClient) EnrichAlert(ctx context.Context, fingerprint string, enrichments map[string]string, opts port.EnrichOptions) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.enrichAlertCalled = true
 	m.enrichedFingerprint = fingerprint
-	m.enrichedEnrichments = enrichments
+	if m.enrichedEnrichments == nil {
+		m.enrichedEnrichments = make(map[string]string)
+	}
+	for k, v := range enrichments {
+		m.enrichedEnrichments[k] = v
+	}
+	// Track each call with its options
+	enrichmentsCopy := make(map[string]string)
+	for k, v := range enrichments {
+		enrichmentsCopy[k] = v
+	}
+	m.enrichCalls = append(m.enrichCalls, enrichCall{
+		Fingerprint:       fingerprint,
+		Enrichments:       enrichmentsCopy,
+		DisposeOnNewAlert: opts.DisposeOnNewAlert,
+	})
 	if m.enrichAlertErr != nil {
 		return m.enrichAlertErr
 	}
@@ -345,7 +367,7 @@ func TestHandleCallbackUseCase_ExecuteAsync_Resolve(t *testing.T) {
 	uc, postRepo, keepClient, mmClient, _ := setupHandleCallbackUseCase()
 
 	fp, _ := alert.NewFingerprint("fp-12345")
-	existingPost := post.NewPost("post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"))
+	existingPost := post.NewPost("post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"), time.Now())
 	postRepo.posts[fp.Value()] = existingPost
 
 	input := dto.MattermostCallbackInput{
@@ -715,4 +737,70 @@ func TestHandleCallbackUseCase_ExecuteImmediate_MissingAttachmentJSON(t *testing
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "attachment_json")
+}
+
+func TestHandleCallbackUseCase_ExecuteAsync_DisposeOnNewAlertOptions(t *testing.T) {
+	t.Run("acknowledge sets status with dispose=true and assignee with dispose=false", func(t *testing.T) {
+		uc, _, keepClient, _, userMapper := setupHandleCallbackUseCase()
+		userMapper.mapping["testuser"] = "keep-user"
+
+		input := dto.MattermostCallbackInput{
+			UserID:    "user-123",
+			PostID:    "post-456",
+			ChannelID: "channel-789",
+			Context: map[string]string{
+				"action":          "acknowledge",
+				"fingerprint":     "fp-12345",
+				"alert_name":      "Test Alert",
+				"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
+			},
+		}
+
+		uc.ExecuteAsync(input)
+		uc.Wait()
+
+		require.Len(t, keepClient.enrichCalls, 2, "should make 2 enrich calls")
+
+		// First call: status with dispose=true
+		statusCall := keepClient.enrichCalls[0]
+		assert.Equal(t, "fp-12345", statusCall.Fingerprint)
+		assert.Equal(t, "acknowledged", statusCall.Enrichments["status"])
+		assert.True(t, statusCall.DisposeOnNewAlert, "status enrichment should have dispose=true")
+
+		// Second call: assignee with dispose=false
+		assigneeCall := keepClient.enrichCalls[1]
+		assert.Equal(t, "fp-12345", assigneeCall.Fingerprint)
+		assert.Equal(t, "keep-user", assigneeCall.Enrichments["assignee"])
+		assert.False(t, assigneeCall.DisposeOnNewAlert, "assignee enrichment should have dispose=false")
+	})
+
+	t.Run("resolve sets status with dispose=true", func(t *testing.T) {
+		uc, postRepo, keepClient, _, _ := setupHandleCallbackUseCase()
+
+		fp, _ := alert.NewFingerprint("fp-12345")
+		existingPost := post.NewPost("post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"), time.Now())
+		postRepo.posts[fp.Value()] = existingPost
+
+		input := dto.MattermostCallbackInput{
+			UserID:    "user-123",
+			PostID:    "post-456",
+			ChannelID: "channel-789",
+			Context: map[string]string{
+				"action":          "resolve",
+				"fingerprint":     "fp-12345",
+				"alert_name":      "Test Alert",
+				"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
+			},
+		}
+
+		uc.ExecuteAsync(input)
+		uc.Wait()
+
+		require.GreaterOrEqual(t, len(keepClient.enrichCalls), 1, "should make at least 1 enrich call")
+
+		// First call: status with dispose=true
+		statusCall := keepClient.enrichCalls[0]
+		assert.Equal(t, "resolved", statusCall.Enrichments["status"])
+		assert.True(t, statusCall.DisposeOnNewAlert, "status enrichment should have dispose=true")
+	})
 }

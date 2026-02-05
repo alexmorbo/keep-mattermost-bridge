@@ -68,13 +68,16 @@ type unenrichRequest struct {
 	Enrichments []string `json:"enrichments"`
 }
 
-func (c *Client) EnrichAlert(ctx context.Context, fingerprint string, enrichments map[string]string) error {
+func (c *Client) EnrichAlert(ctx context.Context, fingerprint string, enrichments map[string]string, opts port.EnrichOptions) error {
 	if enrichments == nil {
 		enrichments = make(map[string]string)
 	}
 
 	start := time.Now()
 	reqURL := c.baseURL + "/alerts/enrich"
+	if opts.DisposeOnNewAlert {
+		reqURL += "?dispose_on_new_alert=true"
+	}
 
 	body := enrichRequest{
 		Fingerprint: fingerprint,
@@ -251,7 +254,14 @@ func (c *Client) GetAlert(ctx context.Context, fingerprint string) (*port.KeepAl
 
 	var firingStartTime time.Time
 	if alertResp.FiringStartTime != "" {
-		firingStartTime, _ = time.Parse(time.RFC3339, alertResp.FiringStartTime)
+		var parseErr error
+		firingStartTime, parseErr = time.Parse(time.RFC3339, alertResp.FiringStartTime)
+		if parseErr != nil {
+			c.logger.Debug("Failed to parse firingStartTime from Keep API",
+				slog.String("value", alertResp.FiringStartTime),
+				slog.String("error", parseErr.Error()),
+			)
+		}
 	}
 
 	source := alertResp.Source

@@ -65,7 +65,14 @@ func (uc *HandleAlertUseCase) Execute(ctx context.Context, input dto.KeepAlertIn
 
 	var firingStartTime time.Time
 	if input.FiringStartTime != "" {
-		firingStartTime, _ = time.Parse(time.RFC3339, input.FiringStartTime)
+		var parseErr error
+		firingStartTime, parseErr = time.Parse(time.RFC3339, input.FiringStartTime)
+		if parseErr != nil {
+			uc.logger.Warn("Failed to parse firingStartTime, using zero value",
+				slog.String("value", input.FiringStartTime),
+				slog.String("error", parseErr.Error()),
+			)
+		}
 	}
 
 	a, err := alert.NewAlert(fingerprint, input.Name, severity, status, input.Description, source, input.Labels, firingStartTime)
@@ -130,7 +137,7 @@ func (uc *HandleAlertUseCase) handleFiring(ctx context.Context, a *alert.Alert, 
 		return fmt.Errorf("create mattermost post: %w", err)
 	}
 
-	newPost := post.NewPost(postID, channelID, fingerprint, a.Name(), a.Severity())
+	newPost := post.NewPost(postID, channelID, fingerprint, a.Name(), a.Severity(), a.FiringStartTime())
 	if err := uc.postRepo.Save(ctx, fingerprint, newPost); err != nil {
 		return fmt.Errorf("save post to store: %w", err)
 	}
@@ -163,7 +170,18 @@ func (uc *HandleAlertUseCase) handleResolved(ctx context.Context, a *alert.Alert
 		return fmt.Errorf("find existing post: %w", err)
 	}
 
-	attachment := uc.msgBuilder.BuildResolvedAttachment(a, uc.keepUIURL)
+	resolvedAlert := alert.RestoreAlert(
+		fingerprint,
+		a.Name(),
+		a.Severity(),
+		a.Status(),
+		a.Description(),
+		a.Source(),
+		a.Labels(),
+		existingPost.FiringStartTime(),
+	)
+
+	attachment := uc.msgBuilder.BuildResolvedAttachment(resolvedAlert, uc.keepUIURL)
 
 	if err := uc.mmClient.UpdatePost(ctx, existingPost.PostID(), attachment); err != nil {
 		return fmt.Errorf("update post to resolved: %w", err)

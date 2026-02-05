@@ -36,7 +36,7 @@ func TestSaveAndFindByFingerprint(t *testing.T) {
 	ctx := context.Background()
 
 	fingerprint := alert.RestoreFingerprint("fp-test-123")
-	p := post.NewPost("post-abc", "channel-xyz", alert.RestoreFingerprint("fp-test-123"), "Test Alert", alert.RestoreSeverity("critical"))
+	p := post.NewPost("post-abc", "channel-xyz", alert.RestoreFingerprint("fp-test-123"), "Test Alert", alert.RestoreSeverity("critical"), time.Now())
 
 	err := repo.Save(ctx, fingerprint, p)
 	require.NoError(t, err)
@@ -72,13 +72,13 @@ func TestSaveOverwritesExisting(t *testing.T) {
 
 	fingerprint := alert.RestoreFingerprint("fp-overwrite")
 
-	p1 := post.NewPost("post-1", "channel-1", alert.RestoreFingerprint("fp-overwrite"), "Alert 1", alert.RestoreSeverity("high"))
+	p1 := post.NewPost("post-1", "channel-1", alert.RestoreFingerprint("fp-overwrite"), "Alert 1", alert.RestoreSeverity("high"), time.Now())
 	err := repo.Save(ctx, fingerprint, p1)
 	require.NoError(t, err)
 
 	time.Sleep(10 * time.Millisecond)
 
-	p2 := post.NewPost("post-2", "channel-2", alert.RestoreFingerprint("fp-overwrite"), "Alert 2", alert.RestoreSeverity("critical"))
+	p2 := post.NewPost("post-2", "channel-2", alert.RestoreFingerprint("fp-overwrite"), "Alert 2", alert.RestoreSeverity("critical"), time.Now())
 	err = repo.Save(ctx, fingerprint, p2)
 	require.NoError(t, err)
 
@@ -95,7 +95,7 @@ func TestDelete(t *testing.T) {
 	ctx := context.Background()
 
 	fingerprint := alert.RestoreFingerprint("fp-delete")
-	p := post.NewPost("post-del", "channel-del", alert.RestoreFingerprint("fp-delete"), "Delete Test", alert.RestoreSeverity("warning"))
+	p := post.NewPost("post-del", "channel-del", alert.RestoreFingerprint("fp-delete"), "Delete Test", alert.RestoreSeverity("warning"), time.Now())
 
 	err := repo.Save(ctx, fingerprint, p)
 	require.NoError(t, err)
@@ -131,7 +131,7 @@ func TestTTLVerification(t *testing.T) {
 	ctx := context.Background()
 
 	fingerprint := alert.RestoreFingerprint("fp-ttl")
-	p := post.NewPost("post-ttl", "channel-ttl", alert.RestoreFingerprint("fp-ttl"), "TTL Test", alert.RestoreSeverity("info"))
+	p := post.NewPost("post-ttl", "channel-ttl", alert.RestoreFingerprint("fp-ttl"), "TTL Test", alert.RestoreSeverity("info"), time.Now())
 
 	err := repo.Save(ctx, fingerprint, p)
 	require.NoError(t, err)
@@ -148,6 +148,7 @@ func TestSavePreservesAllFields(t *testing.T) {
 	repo, _ := setupTestRedis(t)
 	ctx := context.Background()
 
+	firingStartTime := time.Now().Add(-2 * time.Hour)
 	createdTime := time.Now().Add(-1 * time.Hour)
 	updatedTime := time.Now().Add(-30 * time.Minute)
 
@@ -158,6 +159,7 @@ func TestSavePreservesAllFields(t *testing.T) {
 		alert.RestoreFingerprint("fp-fields"),
 		"Field Test Alert",
 		alert.RestoreSeverity("high"),
+		firingStartTime,
 		createdTime,
 		updatedTime,
 	)
@@ -195,7 +197,7 @@ func TestSaveRedisSetError(t *testing.T) {
 	ctx := context.Background()
 
 	fingerprint := alert.RestoreFingerprint("fp-error")
-	p := post.NewPost("post-err", "channel-err", alert.RestoreFingerprint("fp-error"), "Error Test", alert.RestoreSeverity("critical"))
+	p := post.NewPost("post-err", "channel-err", alert.RestoreFingerprint("fp-error"), "Error Test", alert.RestoreSeverity("critical"), time.Now())
 
 	mr.Close()
 

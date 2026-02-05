@@ -38,12 +38,27 @@ func TestEnrichAlertSuccess(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	client := NewClient(server.URL, "test-api-key", logger)
 
-	err := client.EnrichAlert(context.Background(), "fp-12345", map[string]string{"status": "acknowledged"})
+	err := client.EnrichAlert(context.Background(), "fp-12345", map[string]string{"status": "acknowledged"}, port.EnrichOptions{})
 	require.NoError(t, err)
 
 	assert.Equal(t, "test-api-key", capturedAPIKey)
 	assert.Equal(t, "fp-12345", capturedRequest.Fingerprint)
 	assert.Equal(t, "acknowledged", capturedRequest.Enrichments["status"])
+}
+
+func TestEnrichAlertWithDisposeOnNewAlert(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/alerts/enrich", r.URL.Path)
+		assert.Equal(t, "true", r.URL.Query().Get("dispose_on_new_alert"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client := NewClient(server.URL, "test-api-key", logger)
+
+	err := client.EnrichAlert(context.Background(), "fp-12345", map[string]string{"status": "acknowledged"}, port.EnrichOptions{DisposeOnNewAlert: true})
+	require.NoError(t, err)
 }
 
 func TestEnrichAlertSuccessWithCreatedStatus(t *testing.T) {
@@ -55,7 +70,7 @@ func TestEnrichAlertSuccessWithCreatedStatus(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	client := NewClient(server.URL, "test-key", logger)
 
-	err := client.EnrichAlert(context.Background(), "fp-123", map[string]string{"status": "resolved"})
+	err := client.EnrichAlert(context.Background(), "fp-123", map[string]string{"status": "resolved"}, port.EnrichOptions{})
 	require.NoError(t, err)
 }
 
@@ -68,7 +83,7 @@ func TestEnrichAlertSuccessWithNoContentStatus(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	client := NewClient(server.URL, "test-key", logger)
 
-	err := client.EnrichAlert(context.Background(), "fp-123", map[string]string{"status": "firing"})
+	err := client.EnrichAlert(context.Background(), "fp-123", map[string]string{"status": "firing"}, port.EnrichOptions{})
 	require.NoError(t, err)
 }
 
@@ -82,7 +97,7 @@ func TestEnrichAlertServerError(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	client := NewClient(server.URL, "test-key", logger)
 
-	err := client.EnrichAlert(context.Background(), "fp-123", map[string]string{"status": "acknowledged"})
+	err := client.EnrichAlert(context.Background(), "fp-123", map[string]string{"status": "acknowledged"}, port.EnrichOptions{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "status 500")
 }
@@ -97,7 +112,7 @@ func TestEnrichAlertBadRequest(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	client := NewClient(server.URL, "test-key", logger)
 
-	err := client.EnrichAlert(context.Background(), "", map[string]string{"status": "acknowledged"})
+	err := client.EnrichAlert(context.Background(), "", map[string]string{"status": "acknowledged"}, port.EnrichOptions{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "status 400")
 	assert.Contains(t, err.Error(), "invalid fingerprint")
@@ -107,7 +122,7 @@ func TestEnrichAlertNetworkError(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	client := NewClient("http://localhost:1", "test-key", logger)
 
-	err := client.EnrichAlert(context.Background(), "fp-123", map[string]string{"status": "acknowledged"})
+	err := client.EnrichAlert(context.Background(), "fp-123", map[string]string{"status": "acknowledged"}, port.EnrichOptions{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "keep enrich alert")
 }
@@ -124,7 +139,7 @@ func TestEnrichAlertContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := client.EnrichAlert(ctx, "fp-123", map[string]string{"status": "acknowledged"})
+	err := client.EnrichAlert(ctx, "fp-123", map[string]string{"status": "acknowledged"}, port.EnrichOptions{})
 	require.Error(t, err)
 }
 
@@ -143,7 +158,7 @@ func TestEnrichAlertNilEnrichments(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	client := NewClient(server.URL, "test-key", logger)
 
-	err := client.EnrichAlert(context.Background(), "fp-123", nil)
+	err := client.EnrichAlert(context.Background(), "fp-123", nil, port.EnrichOptions{})
 	require.NoError(t, err)
 
 	assert.Equal(t, "fp-123", capturedRequest.Fingerprint)
