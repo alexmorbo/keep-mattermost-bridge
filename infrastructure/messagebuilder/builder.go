@@ -105,7 +105,7 @@ func (b *Builder) BuildAcknowledgedAttachment(a *alert.Alert, callbackURL, keepU
 	}
 	titleLink := fmt.Sprintf("%s/alerts/feed?fingerprint=%s", keepUIURL, url.QueryEscape(a.Fingerprint().Value()))
 
-	fields := b.buildFields(a.Labels(), "acknowledged")
+	fields := b.buildFields(a.Labels(), severity)
 
 	if b.msgConfig.ShowDescriptionField() && a.Description() != "" {
 		fields = append([]post.AttachmentField{
@@ -169,6 +169,7 @@ func (b *Builder) BuildAcknowledgedAttachment(a *alert.Alert, callbackURL, keepU
 }
 
 func (b *Builder) BuildResolvedAttachment(a *alert.Alert, keepUIURL string) post.Attachment {
+	severity := a.Severity().String()
 	color := b.msgConfig.ColorForSeverity("resolved")
 
 	title := fmt.Sprintf("✅ %s", a.Name())
@@ -177,7 +178,7 @@ func (b *Builder) BuildResolvedAttachment(a *alert.Alert, keepUIURL string) post
 	}
 	titleLink := fmt.Sprintf("%s/alerts/feed?fingerprint=%s", keepUIURL, url.QueryEscape(a.Fingerprint().Value()))
 
-	fields := b.buildFields(a.Labels(), "resolved")
+	fields := b.buildFields(a.Labels(), severity)
 
 	if b.msgConfig.ShowDescriptionField() && a.Description() != "" {
 		fields = append([]post.AttachmentField{
