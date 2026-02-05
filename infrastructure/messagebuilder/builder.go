@@ -2,6 +2,7 @@ package messagebuilder
 
 import (
 	"fmt"
+	"log/slog"
 	"net/url"
 	"sort"
 	"strings"
@@ -10,18 +11,6 @@ import (
 	"github.com/alexmorbo/keep-mattermost-bridge/application/port"
 	"github.com/alexmorbo/keep-mattermost-bridge/domain/alert"
 	"github.com/alexmorbo/keep-mattermost-bridge/domain/post"
-)
-
-const (
-	ActionAcknowledge   = "acknowledge"
-	ActionResolve       = "resolve"
-	ActionUnacknowledge = "unacknowledge"
-)
-
-const (
-	ButtonStyleDefault = "default"
-	ButtonStyleSuccess = "success"
-	ButtonStyleDanger  = "danger"
 )
 
 type Builder struct {
@@ -37,46 +26,61 @@ func (b *Builder) BuildFiringAttachment(a *alert.Alert, callbackURL, keepUIURL s
 	color := b.msgConfig.ColorForSeverity(severity)
 	emoji := b.msgConfig.EmojiForSeverity(severity)
 
-	title := fmt.Sprintf("%s %s | %s", emoji, strings.ToUpper(severity), a.Name())
+	title := fmt.Sprintf("%s %s", emoji, a.Name())
 	if duration := formatDuration(a.FiringStartTime()); duration != "" {
 		title = fmt.Sprintf("%s (%s)", title, duration)
 	}
 	titleLink := fmt.Sprintf("%s/alerts/feed?fingerprint=%s", keepUIURL, url.QueryEscape(a.Fingerprint().Value()))
 
-	fields := b.buildFields(a.Labels())
+	fields := b.buildFields(a.Labels(), severity)
 
-	if a.Description() != "" {
+	if b.msgConfig.ShowDescriptionField() && a.Description() != "" {
 		fields = append([]post.AttachmentField{
 			{Title: "Description", Value: a.Description(), Short: false},
 		}, fields...)
 	}
 
+	attachmentWithoutButtons := post.Attachment{
+		Color:     color,
+		Title:     title,
+		TitleLink: titleLink,
+		Fields:    fields,
+	}
+
+	attachmentJSON, err := attachmentWithoutButtons.ToJSON()
+	if err != nil {
+		slog.Error("Failed to serialize attachment to JSON", slog.String("error", err.Error()))
+		attachmentJSON = ""
+	}
+
 	buttons := []post.Button{
 		{
-			ID:    ActionAcknowledge,
+			ID:    post.ActionAcknowledge,
 			Name:  "Acknowledge",
-			Style: ButtonStyleDefault,
+			Style: post.ButtonStyleDefault,
 			Integration: post.ButtonIntegration{
 				URL: callbackURL,
 				Context: map[string]string{
-					"action":      ActionAcknowledge,
-					"fingerprint": a.Fingerprint().Value(),
-					"alert_name":  a.Name(),
-					"severity":    severity,
+					post.ContextKeyAction:         post.ActionAcknowledge,
+					post.ContextKeyFingerprint:    a.Fingerprint().Value(),
+					post.ContextKeyAlertName:      a.Name(),
+					post.ContextKeySeverity:       severity,
+					post.ContextKeyAttachmentJSON: attachmentJSON,
 				},
 			},
 		},
 		{
-			ID:    ActionResolve,
+			ID:    post.ActionResolve,
 			Name:  "Resolve",
-			Style: ButtonStyleSuccess,
+			Style: post.ButtonStyleSuccess,
 			Integration: post.ButtonIntegration{
 				URL: callbackURL,
 				Context: map[string]string{
-					"action":      ActionResolve,
-					"fingerprint": a.Fingerprint().Value(),
-					"alert_name":  a.Name(),
-					"severity":    severity,
+					post.ContextKeyAction:         post.ActionResolve,
+					post.ContextKeyFingerprint:    a.Fingerprint().Value(),
+					post.ContextKeyAlertName:      a.Name(),
+					post.ContextKeySeverity:       severity,
+					post.ContextKeyAttachmentJSON: attachmentJSON,
 				},
 			},
 		},
@@ -95,46 +99,61 @@ func (b *Builder) BuildAcknowledgedAttachment(a *alert.Alert, callbackURL, keepU
 	severity := a.Severity().String()
 	color := b.msgConfig.ColorForSeverity("acknowledged")
 
-	title := fmt.Sprintf("👀 ACKNOWLEDGED | %s", a.Name())
+	title := fmt.Sprintf("👀 %s", a.Name())
 	if duration := formatDuration(a.FiringStartTime()); duration != "" {
 		title = fmt.Sprintf("%s (%s)", title, duration)
 	}
 	titleLink := fmt.Sprintf("%s/alerts/feed?fingerprint=%s", keepUIURL, url.QueryEscape(a.Fingerprint().Value()))
 
-	fields := b.buildFields(a.Labels())
+	fields := b.buildFields(a.Labels(), "acknowledged")
 
-	if a.Description() != "" {
+	if b.msgConfig.ShowDescriptionField() && a.Description() != "" {
 		fields = append([]post.AttachmentField{
 			{Title: "Description", Value: a.Description(), Short: false},
 		}, fields...)
 	}
 
+	attachmentWithoutButtons := post.Attachment{
+		Color:     color,
+		Title:     title,
+		TitleLink: titleLink,
+		Fields:    fields,
+	}
+
+	attachmentJSON, err := attachmentWithoutButtons.ToJSON()
+	if err != nil {
+		slog.Error("Failed to serialize attachment to JSON", slog.String("error", err.Error()))
+		attachmentJSON = ""
+	}
+
 	buttons := []post.Button{
 		{
-			ID:    ActionUnacknowledge,
+			ID:    post.ActionUnacknowledge,
 			Name:  "Unacknowledge",
-			Style: ButtonStyleDefault,
+			Style: post.ButtonStyleDefault,
 			Integration: post.ButtonIntegration{
 				URL: callbackURL,
 				Context: map[string]string{
-					"action":      ActionUnacknowledge,
-					"fingerprint": a.Fingerprint().Value(),
-					"alert_name":  a.Name(),
-					"severity":    severity,
+					post.ContextKeyAction:         post.ActionUnacknowledge,
+					post.ContextKeyFingerprint:    a.Fingerprint().Value(),
+					post.ContextKeyAlertName:      a.Name(),
+					post.ContextKeySeverity:       severity,
+					post.ContextKeyAttachmentJSON: attachmentJSON,
 				},
 			},
 		},
 		{
-			ID:    ActionResolve,
+			ID:    post.ActionResolve,
 			Name:  "Resolve",
-			Style: ButtonStyleSuccess,
+			Style: post.ButtonStyleSuccess,
 			Integration: post.ButtonIntegration{
 				URL: callbackURL,
 				Context: map[string]string{
-					"action":      ActionResolve,
-					"fingerprint": a.Fingerprint().Value(),
-					"alert_name":  a.Name(),
-					"severity":    severity,
+					post.ContextKeyAction:         post.ActionResolve,
+					post.ContextKeyFingerprint:    a.Fingerprint().Value(),
+					post.ContextKeyAlertName:      a.Name(),
+					post.ContextKeySeverity:       severity,
+					post.ContextKeyAttachmentJSON: attachmentJSON,
 				},
 			},
 		},
@@ -152,15 +171,15 @@ func (b *Builder) BuildAcknowledgedAttachment(a *alert.Alert, callbackURL, keepU
 func (b *Builder) BuildResolvedAttachment(a *alert.Alert, keepUIURL string) post.Attachment {
 	color := b.msgConfig.ColorForSeverity("resolved")
 
-	title := fmt.Sprintf("✅ RESOLVED | %s", a.Name())
+	title := fmt.Sprintf("✅ %s", a.Name())
 	if duration := formatDuration(a.FiringStartTime()); duration != "" {
 		title = fmt.Sprintf("%s (%s)", title, duration)
 	}
 	titleLink := fmt.Sprintf("%s/alerts/feed?fingerprint=%s", keepUIURL, url.QueryEscape(a.Fingerprint().Value()))
 
-	fields := b.buildFields(a.Labels())
+	fields := b.buildFields(a.Labels(), "resolved")
 
-	if a.Description() != "" {
+	if b.msgConfig.ShowDescriptionField() && a.Description() != "" {
 		fields = append([]post.AttachmentField{
 			{Title: "Description", Value: a.Description(), Short: false},
 		}, fields...)
@@ -174,18 +193,21 @@ func (b *Builder) BuildResolvedAttachment(a *alert.Alert, keepUIURL string) post
 	}
 }
 
-func (b *Builder) BuildLoadingAttachment(action, alertName, fingerprint, keepUIURL string) post.Attachment {
-	var style string
-	switch action {
-	case ActionResolve:
-		style = ButtonStyleSuccess
-	default:
-		style = ButtonStyleDefault
+func (b *Builder) BuildProcessingAttachment(attachmentJSON, action string) (post.Attachment, error) {
+	attachment, err := post.AttachmentFromJSON(attachmentJSON)
+	if err != nil {
+		return post.Attachment{}, fmt.Errorf("deserialize attachment: %w", err)
 	}
 
-	titleLink := fmt.Sprintf("%s/alerts/feed?fingerprint=%s", keepUIURL, url.QueryEscape(fingerprint))
+	var style string
+	switch action {
+	case post.ActionResolve:
+		style = post.ButtonStyleSuccess
+	default:
+		style = post.ButtonStyleDefault
+	}
 
-	buttons := []post.Button{
+	attachment.Actions = []post.Button{
 		{
 			ID:    "processing",
 			Name:  "Processing...",
@@ -193,12 +215,7 @@ func (b *Builder) BuildLoadingAttachment(action, alertName, fingerprint, keepUIU
 		},
 	}
 
-	return post.Attachment{
-		Color:     "#808080",
-		Title:     alertName,
-		TitleLink: titleLink,
-		Actions:   buttons,
-	}
+	return *attachment, nil
 }
 
 func (b *Builder) BuildErrorAttachment(alertName, fingerprint, keepUIURL, errorMsg string) post.Attachment {
@@ -208,7 +225,7 @@ func (b *Builder) BuildErrorAttachment(alertName, fingerprint, keepUIURL, errorM
 		{
 			ID:    "error",
 			Name:  "Error: " + errorMsg,
-			Style: ButtonStyleDanger,
+			Style: post.ButtonStyleDanger,
 		},
 	}
 
@@ -220,9 +237,14 @@ func (b *Builder) BuildErrorAttachment(alertName, fingerprint, keepUIURL, errorM
 	}
 }
 
-func (b *Builder) buildFields(labels map[string]string) []post.AttachmentField {
-	var fields []post.AttachmentField
-	var topologyLabels []string
+func (b *Builder) buildFields(labels map[string]string, severity string) []post.AttachmentField {
+	var displayFields []post.AttachmentField
+	groupBuckets := make(map[string][]string)
+	var ungroupedLabels []string
+
+	groups := b.msgConfig.GetLabelGroups()
+	groupingEnabled := b.msgConfig.IsLabelGroupingEnabled()
+	threshold := b.msgConfig.GetLabelGroupingThreshold()
 
 	keys := make([]string, 0, len(labels))
 	for k := range labels {
@@ -240,35 +262,111 @@ func (b *Builder) buildFields(labels map[string]string) []post.AttachmentField {
 			continue
 		}
 
-		// Collect topology labels separately
-		if strings.HasPrefix(key, "topology_") || strings.Contains(key, "_topology_") {
-			displayKey := strings.ReplaceAll(key, "_", ".")
-			topologyLabels = append(topologyLabels, fmt.Sprintf("• %s: %s", displayKey, value))
+		if b.msgConfig.IsLabelDisplayed(key) {
+			displayName := b.msgConfig.RenameLabel(key)
+			displayFields = append(displayFields, post.AttachmentField{
+				Title: displayName,
+				Value: value,
+				Short: true,
+			})
 			continue
 		}
 
-		if !b.msgConfig.IsLabelDisplayed(key) {
-			continue
+		if groupingEnabled {
+			groupName := b.matchLabelToGroup(key, groups)
+			if groupName != "" {
+				formattedKey := b.formatLabelKey(key, groups)
+				groupBuckets[groupName] = append(groupBuckets[groupName], fmt.Sprintf(" %s: `%s`", formattedKey, value))
+			} else {
+				ungroupedLabels = append(ungroupedLabels, fmt.Sprintf(" %s: `%s`", key, value))
+			}
 		}
+	}
 
-		displayName := b.msgConfig.RenameLabel(key)
-		fields = append(fields, post.AttachmentField{
-			Title: displayName,
-			Value: value,
+	var severityField post.AttachmentField
+	showSeverity := b.msgConfig.ShowSeverityField()
+	severityPosition := b.msgConfig.SeverityFieldPosition()
+
+	if showSeverity {
+		severityField = post.AttachmentField{
+			Title: "Severity",
+			Value: strings.ToUpper(severity),
 			Short: true,
-		})
+		}
 	}
 
-	// Add topology section if there are any topology labels
-	if len(topologyLabels) > 0 {
-		fields = append(fields, post.AttachmentField{
-			Title: "Topology",
-			Value: strings.Join(topologyLabels, "\n"),
-			Short: false,
-		})
+	var result []post.AttachmentField
+
+	if showSeverity && severityPosition == post.SeverityPositionFirst {
+		result = append(result, severityField)
 	}
 
-	return fields
+	result = append(result, displayFields...)
+
+	if showSeverity && severityPosition == post.SeverityPositionAfterDisplay {
+		result = append(result, severityField)
+	}
+
+	if groupingEnabled {
+		sortedGroups := b.sortGroupsByPriority(groups)
+		for _, group := range sortedGroups {
+			bucket := groupBuckets[group.GroupName]
+			if len(bucket) >= threshold {
+				result = append(result, post.AttachmentField{
+					Title: group.GroupName,
+					Value: strings.Join(bucket, "\n"),
+					Short: false,
+				})
+			} else {
+				ungroupedLabels = append(ungroupedLabels, bucket...)
+			}
+		}
+
+		if len(ungroupedLabels) > 0 {
+			result = append(result, post.AttachmentField{
+				Title: "Labels",
+				Value: strings.Join(ungroupedLabels, "\n"),
+				Short: false,
+			})
+		}
+	}
+
+	if showSeverity && severityPosition == post.SeverityPositionLast {
+		result = append(result, severityField)
+	}
+
+	return result
+}
+
+func (b *Builder) matchLabelToGroup(key string, groups []port.LabelGroupConfig) string {
+	for _, group := range groups {
+		for _, prefix := range group.Prefixes {
+			if strings.HasPrefix(key, prefix) {
+				return group.GroupName
+			}
+		}
+	}
+	return ""
+}
+
+func (b *Builder) formatLabelKey(key string, groups []port.LabelGroupConfig) string {
+	for _, group := range groups {
+		for _, prefix := range group.Prefixes {
+			if strings.HasPrefix(key, prefix) {
+				return strings.TrimPrefix(key, prefix)
+			}
+		}
+	}
+	return key
+}
+
+func (b *Builder) sortGroupsByPriority(groups []port.LabelGroupConfig) []port.LabelGroupConfig {
+	sorted := make([]port.LabelGroupConfig, len(groups))
+	copy(sorted, groups)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Priority > sorted[j].Priority
+	})
+	return sorted
 }
 
 func formatDuration(start time.Time) string {

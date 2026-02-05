@@ -230,11 +230,11 @@ func (m *mockMessageBuilderCallback) BuildResolvedAttachment(a *alert.Alert, kee
 	}
 }
 
-func (m *mockMessageBuilderCallback) BuildLoadingAttachment(action, alertName, fingerprint, keepUIURL string) post.Attachment {
+func (m *mockMessageBuilderCallback) BuildProcessingAttachment(attachmentJSON, action string) (post.Attachment, error) {
 	return post.Attachment{
 		Color: "#808080",
-		Title: alertName,
-	}
+		Title: "Processing Alert",
+	}, nil
 }
 
 func (m *mockMessageBuilderCallback) BuildErrorAttachment(alertName, fingerprint, keepUIURL, errorMsg string) post.Attachment {
@@ -275,9 +275,10 @@ func TestHandleCallbackUseCase_ExecuteImmediate_ReturnsLoadingState(t *testing.T
 		PostID:    "post-456",
 		ChannelID: "channel-789",
 		Context: map[string]string{
-			"action":      "acknowledge",
-			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
+			"action":          "acknowledge",
+			"fingerprint":     "fp-12345",
+			"alert_name":      "Test Alert",
+			"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
 		},
 	}
 
@@ -286,7 +287,7 @@ func TestHandleCallbackUseCase_ExecuteImmediate_ReturnsLoadingState(t *testing.T
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, "#808080", result.Attachment.Color)
-	assert.Equal(t, "Test Alert", result.Attachment.Title)
+	assert.Equal(t, "Processing Alert", result.Attachment.Title)
 	assert.Empty(t, result.Ephemeral)
 }
 
@@ -313,9 +314,10 @@ func TestHandleCallbackUseCase_ExecuteAsync_Acknowledge(t *testing.T) {
 		PostID:    "post-456",
 		ChannelID: "channel-789",
 		Context: map[string]string{
-			"action":      "acknowledge",
-			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
+			"action":          "acknowledge",
+			"fingerprint":     "fp-12345",
+			"alert_name":      "Test Alert",
+			"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
 		},
 	}
 
@@ -343,9 +345,10 @@ func TestHandleCallbackUseCase_ExecuteAsync_Resolve(t *testing.T) {
 		PostID:    "post-456",
 		ChannelID: "channel-789",
 		Context: map[string]string{
-			"action":      "resolve",
-			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
+			"action":          "resolve",
+			"fingerprint":     "fp-12345",
+			"alert_name":      "Test Alert",
+			"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
 		},
 	}
 
@@ -368,9 +371,10 @@ func TestHandleCallbackUseCase_ExecuteAsync_Unacknowledge(t *testing.T) {
 		PostID:    "post-456",
 		ChannelID: "channel-789",
 		Context: map[string]string{
-			"action":      "unacknowledge",
-			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
+			"action":          "unacknowledge",
+			"fingerprint":     "fp-12345",
+			"alert_name":      "Test Alert",
+			"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
 		},
 	}
 
@@ -395,9 +399,10 @@ func TestHandleCallbackUseCase_ExecuteAsync_GetAlertError(t *testing.T) {
 		PostID:    "post-456",
 		ChannelID: "channel-789",
 		Context: map[string]string{
-			"action":      "acknowledge",
-			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
+			"action":          "acknowledge",
+			"fingerprint":     "fp-12345",
+			"alert_name":      "Test Alert",
+			"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
 		},
 	}
 
@@ -417,9 +422,10 @@ func TestHandleCallbackUseCase_ExecuteAsync_InvalidSeverity(t *testing.T) {
 		PostID:    "post-456",
 		ChannelID: "channel-789",
 		Context: map[string]string{
-			"action":      "acknowledge",
-			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
+			"action":          "acknowledge",
+			"fingerprint":     "fp-12345",
+			"alert_name":      "Test Alert",
+			"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
 		},
 	}
 
@@ -439,9 +445,10 @@ func TestHandleCallbackUseCase_ExecuteAsync_GetUserError(t *testing.T) {
 		PostID:    "post-456",
 		ChannelID: "channel-789",
 		Context: map[string]string{
-			"action":      "acknowledge",
-			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
+			"action":          "acknowledge",
+			"fingerprint":     "fp-12345",
+			"alert_name":      "Test Alert",
+			"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
 		},
 	}
 
@@ -464,9 +471,10 @@ func TestHandleCallbackUseCase_ExecuteAsync_EnrichAPIError(t *testing.T) {
 		PostID:    "post-456",
 		ChannelID: "channel-789",
 		Context: map[string]string{
-			"action":      "acknowledge",
-			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
+			"action":          "acknowledge",
+			"fingerprint":     "fp-12345",
+			"alert_name":      "Test Alert",
+			"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
 		},
 	}
 
@@ -484,9 +492,10 @@ func TestHandleCallbackUseCase_ExecuteAsync_UnknownAction(t *testing.T) {
 		PostID:    "post-456",
 		ChannelID: "channel-789",
 		Context: map[string]string{
-			"action":      "unknown",
-			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
+			"action":          "unknown",
+			"fingerprint":     "fp-12345",
+			"alert_name":      "Test Alert",
+			"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
 		},
 	}
 
@@ -506,9 +515,10 @@ func TestHandleCallbackUseCase_ExecuteAsync_AcknowledgeWithUserMapping(t *testin
 		PostID:    "post-456",
 		ChannelID: "channel-789",
 		Context: map[string]string{
-			"action":      "acknowledge",
-			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
+			"action":          "acknowledge",
+			"fingerprint":     "fp-12345",
+			"alert_name":      "Test Alert",
+			"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
 		},
 	}
 
@@ -527,9 +537,10 @@ func TestHandleCallbackUseCase_ExecuteAsync_AcknowledgeWithoutUserMapping(t *tes
 		PostID:    "post-456",
 		ChannelID: "channel-789",
 		Context: map[string]string{
-			"action":      "acknowledge",
-			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
+			"action":          "acknowledge",
+			"fingerprint":     "fp-12345",
+			"alert_name":      "Test Alert",
+			"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
 		},
 	}
 
@@ -551,9 +562,10 @@ func TestHandleCallbackUseCase_Wait(t *testing.T) {
 			PostID:    "post-456",
 			ChannelID: "channel-789",
 			Context: map[string]string{
-				"action":      "acknowledge",
-				"fingerprint": "fp-12345",
-				"alert_name":  "Test Alert",
+				"action":          "acknowledge",
+				"fingerprint":     "fp-12345",
+				"alert_name":      "Test Alert",
+				"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
 			},
 		}
 
@@ -594,9 +606,10 @@ func TestHandleCallbackUseCase_ExecuteAsync_DifferentSeverities(t *testing.T) {
 				PostID:    "post-456",
 				ChannelID: "channel-789",
 				Context: map[string]string{
-					"action":      "acknowledge",
-					"fingerprint": "fp-12345",
-					"alert_name":  "Test Alert",
+					"action":          "acknowledge",
+					"fingerprint":     "fp-12345",
+					"alert_name":      "Test Alert",
+					"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
 				},
 			}
 
@@ -618,9 +631,10 @@ func TestHandleCallbackUseCase_ExecuteAsync_UpdatePostError(t *testing.T) {
 		PostID:    "post-456",
 		ChannelID: "channel-789",
 		Context: map[string]string{
-			"action":      "acknowledge",
-			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
+			"action":          "acknowledge",
+			"fingerprint":     "fp-12345",
+			"alert_name":      "Test Alert",
+			"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
 		},
 	}
 
@@ -643,9 +657,10 @@ func TestHandleCallbackUseCase_ExecuteAsync_ReplyToThreadError(t *testing.T) {
 		PostID:    "post-456",
 		ChannelID: "channel-789",
 		Context: map[string]string{
-			"action":      "acknowledge",
-			"fingerprint": "fp-12345",
-			"alert_name":  "Test Alert",
+			"action":          "acknowledge",
+			"fingerprint":     "fp-12345",
+			"alert_name":      "Test Alert",
+			"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
 		},
 	}
 
@@ -673,4 +688,22 @@ func TestHandleCallbackUseCase_ExecuteImmediate_MissingAlertName(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "alert_name")
+}
+
+func TestHandleCallbackUseCase_ExecuteImmediate_MissingAttachmentJSON(t *testing.T) {
+	uc, _, _, _, _ := setupHandleCallbackUseCase()
+
+	input := dto.MattermostCallbackInput{
+		UserID: "user-123",
+		Context: map[string]string{
+			"action":      "acknowledge",
+			"fingerprint": "fp-12345",
+			"alert_name":  "Test Alert",
+		},
+	}
+
+	_, err := uc.ExecuteImmediate(input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "attachment_json")
 }

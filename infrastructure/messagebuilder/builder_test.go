@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/alexmorbo/keep-mattermost-bridge/domain/alert"
+	"github.com/alexmorbo/keep-mattermost-bridge/domain/post"
 	"github.com/alexmorbo/keep-mattermost-bridge/infrastructure/config"
 )
 
@@ -33,9 +34,10 @@ func TestBuildFiringAttachment(t *testing.T) {
 					Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
 				},
 				Labels: config.LabelsConfig{
-					Display: []string{"host", "job"},
-					Exclude: []string{},
-					Rename:  map[string]string{"host": "Server"},
+					Display:  []string{"host", "job"},
+					Exclude:  []string{},
+					Rename:   map[string]string{"host": "Server"},
+					Grouping: config.LabelGroupingConfig{},
 				},
 			},
 			alertSeverity:  "critical",
@@ -44,7 +46,7 @@ func TestBuildFiringAttachment(t *testing.T) {
 			labels:         map[string]string{"host": "server-1", "job": "monitoring"},
 			expectedColor:  "#CC0000",
 			expectedEmoji:  "🔴",
-			expectedFields: 3,
+			expectedFields: 4,
 			hasButtons:     true,
 		},
 		{
@@ -56,9 +58,10 @@ func TestBuildFiringAttachment(t *testing.T) {
 					Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
 				},
 				Labels: config.LabelsConfig{
-					Display: []string{"service"},
-					Exclude: []string{},
-					Rename:  map[string]string{},
+					Display:  []string{"service"},
+					Exclude:  []string{},
+					Rename:   map[string]string{},
+					Grouping: config.LabelGroupingConfig{},
 				},
 			},
 			alertSeverity:  "warning",
@@ -67,7 +70,7 @@ func TestBuildFiringAttachment(t *testing.T) {
 			labels:         map[string]string{"service": "api", "ignored": "value"},
 			expectedColor:  "#EDA200",
 			expectedEmoji:  "🟡",
-			expectedFields: 1,
+			expectedFields: 2,
 			hasButtons:     true,
 		},
 		{
@@ -79,9 +82,10 @@ func TestBuildFiringAttachment(t *testing.T) {
 					Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
 				},
 				Labels: config.LabelsConfig{
-					Display: []string{},
-					Exclude: []string{"internal"},
-					Rename:  map[string]string{},
+					Display:  []string{},
+					Exclude:  []string{"internal"},
+					Rename:   map[string]string{},
+					Grouping: config.LabelGroupingConfig{},
 				},
 			},
 			alertSeverity:  "info",
@@ -90,7 +94,7 @@ func TestBuildFiringAttachment(t *testing.T) {
 			labels:         map[string]string{"host": "server-1", "internal": "skip-me"},
 			expectedColor:  "#0066FF",
 			expectedEmoji:  "🔵",
-			expectedFields: 2,
+			expectedFields: 3,
 			hasButtons:     true,
 		},
 		{
@@ -102,9 +106,10 @@ func TestBuildFiringAttachment(t *testing.T) {
 					Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
 				},
 				Labels: config.LabelsConfig{
-					Display: []string{},
-					Exclude: []string{},
-					Rename:  map[string]string{"job": "Job Name", "host": "Hostname"},
+					Display:  []string{},
+					Exclude:  []string{},
+					Rename:   map[string]string{"job": "Job Name", "host": "Hostname"},
+					Grouping: config.LabelGroupingConfig{},
 				},
 			},
 			alertSeverity:  "high",
@@ -113,7 +118,7 @@ func TestBuildFiringAttachment(t *testing.T) {
 			labels:         map[string]string{"job": "db-monitor", "host": "db-01"},
 			expectedColor:  "#FF6600",
 			expectedEmoji:  "🟠",
-			expectedFields: 3,
+			expectedFields: 4,
 			hasButtons:     true,
 		},
 	}
@@ -144,8 +149,20 @@ func TestBuildFiringAttachment(t *testing.T) {
 			assert.Equal(t, tt.expectedColor, attachment.Color, "color mismatch")
 			assert.Contains(t, attachment.Title, tt.expectedEmoji, "emoji not in title")
 			assert.Contains(t, attachment.Title, tt.alertName, "alert name not in title")
+			assert.NotContains(t, attachment.Title, tt.alertSeverity, "severity should not be in title")
 			assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?fingerprint=test-fingerprint-123")
 			assert.Equal(t, tt.expectedFields, len(attachment.Fields), "fields count mismatch")
+
+			// Find Severity field (may not be first if Description is present)
+			var foundSeverity bool
+			for _, field := range attachment.Fields {
+				if field.Title == "Severity" {
+					foundSeverity = true
+					assert.True(t, field.Short, "Severity field should be short")
+					break
+				}
+			}
+			assert.True(t, foundSeverity, "should have Severity field")
 
 			if tt.hasButtons {
 				assert.Len(t, attachment.Actions, 2, "should have 2 buttons")
@@ -169,9 +186,10 @@ func TestBuildAcknowledgedAttachment(t *testing.T) {
 			Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
 		},
 		Labels: config.LabelsConfig{
-			Display: []string{},
-			Exclude: []string{},
-			Rename:  map[string]string{},
+			Display:  []string{},
+			Exclude:  []string{},
+			Rename:   map[string]string{},
+			Grouping: config.LabelGroupingConfig{},
 		},
 	}
 
@@ -198,7 +216,6 @@ func TestBuildAcknowledgedAttachment(t *testing.T) {
 
 	assert.Equal(t, "#FFA500", attachment.Color, "should have orange color")
 	assert.Contains(t, attachment.Title, "👀")
-	assert.Contains(t, attachment.Title, "ACKNOWLEDGED")
 	assert.Contains(t, attachment.Title, "Test Alert")
 	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?fingerprint=ack-fingerprint-456")
 
@@ -220,9 +237,10 @@ func TestBuildResolvedAttachment(t *testing.T) {
 			Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
 		},
 		Labels: config.LabelsConfig{
-			Display: []string{},
-			Exclude: []string{},
-			Rename:  map[string]string{},
+			Display:  []string{},
+			Exclude:  []string{},
+			Rename:   map[string]string{},
+			Grouping: config.LabelGroupingConfig{},
 		},
 	}
 
@@ -249,7 +267,6 @@ func TestBuildResolvedAttachment(t *testing.T) {
 
 	assert.Equal(t, "#00CC00", attachment.Color, "should have green color")
 	assert.Contains(t, attachment.Title, "✅")
-	assert.Contains(t, attachment.Title, "RESOLVED")
 	assert.Contains(t, attachment.Title, "Resolved Alert")
 	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?fingerprint=resolved-fingerprint-789")
 
@@ -277,8 +294,8 @@ func TestBuildFieldsFiltering(t *testing.T) {
 				"debug":    "true",
 				"env":      "prod",
 			},
-			expectedCount: 2,
-			checkTitles:   []string{"host", "env"},
+			expectedCount: 3,
+			checkTitles:   []string{"Severity", "host", "env"},
 		},
 		{
 			name:          "display only specific labels",
@@ -291,8 +308,8 @@ func TestBuildFieldsFiltering(t *testing.T) {
 				"region":  "us-east",
 				"env":     "prod",
 			},
-			expectedCount: 2,
-			checkTitles:   []string{"host", "service"},
+			expectedCount: 3,
+			checkTitles:   []string{"Severity", "host", "service"},
 		},
 		{
 			name:          "rename labels",
@@ -306,8 +323,8 @@ func TestBuildFieldsFiltering(t *testing.T) {
 				"host": "server-1",
 				"env":  "production",
 			},
-			expectedCount: 2,
-			checkTitles:   []string{"Server Name", "Environment"},
+			expectedCount: 3,
+			checkTitles:   []string{"Severity", "Server Name", "Environment"},
 		},
 		{
 			name:          "empty label values are filtered",
@@ -319,8 +336,8 @@ func TestBuildFieldsFiltering(t *testing.T) {
 				"empty": "",
 				"env":   "prod",
 			},
-			expectedCount: 2,
-			checkTitles:   []string{"host", "env"},
+			expectedCount: 3,
+			checkTitles:   []string{"Severity", "host", "env"},
 		},
 	}
 
@@ -333,9 +350,10 @@ func TestBuildFieldsFiltering(t *testing.T) {
 					Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
 				},
 				Labels: config.LabelsConfig{
-					Display: tt.displayLabels,
-					Exclude: tt.excludeLabels,
-					Rename:  tt.renameLabels,
+					Display:  tt.displayLabels,
+					Exclude:  tt.excludeLabels,
+					Rename:   tt.renameLabels,
+					Grouping: config.LabelGroupingConfig{},
 				},
 			}
 
@@ -447,7 +465,9 @@ func TestDifferentSeveritiesProduceDifferentColorsAndEmojis(t *testing.T) {
 			},
 			Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
 		},
-		Labels: config.LabelsConfig{},
+		Labels: config.LabelsConfig{
+			Grouping: config.LabelGroupingConfig{},
+		},
 	}
 
 	builder := NewBuilder(fileConfig)
@@ -490,55 +510,62 @@ func TestDifferentSeveritiesProduceDifferentColorsAndEmojis(t *testing.T) {
 	}
 }
 
-func TestBuildLoadingAttachment(t *testing.T) {
+func TestBuildProcessingAttachment(t *testing.T) {
 	fileConfig := &config.FileConfig{
 		Message: config.MessageConfig{
 			Colors: map[string]string{},
 			Emoji:  map[string]string{},
 			Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
 		},
-		Labels: config.LabelsConfig{},
+		Labels: config.LabelsConfig{
+			Grouping: config.LabelGroupingConfig{},
+		},
 	}
 
 	builder := NewBuilder(fileConfig)
 
+	testAttachment := post.Attachment{
+		Color:     "#CC0000",
+		Title:     "🔴 Test Alert",
+		TitleLink: "http://keep.ui/alerts/feed?fingerprint=fp-123",
+		Fields: []post.AttachmentField{
+			{Title: "Severity", Value: "CRITICAL", Short: true},
+		},
+	}
+	attachmentJSON, err := testAttachment.ToJSON()
+	require.NoError(t, err)
+
 	tests := []struct {
 		name          string
 		action        string
-		alertName     string
-		fingerprint   string
 		expectedStyle string
 	}{
 		{
 			name:          "acknowledge action uses default style",
 			action:        "acknowledge",
-			alertName:     "CPU Alert",
-			fingerprint:   "fp-123",
 			expectedStyle: "default",
 		},
 		{
 			name:          "resolve action uses success style",
 			action:        "resolve",
-			alertName:     "Memory Alert",
-			fingerprint:   "fp-456",
 			expectedStyle: "success",
 		},
 		{
 			name:          "unacknowledge action uses default style",
 			action:        "unacknowledge",
-			alertName:     "Disk Alert",
-			fingerprint:   "fp-789",
 			expectedStyle: "default",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			attachment := builder.BuildLoadingAttachment(tt.action, tt.alertName, tt.fingerprint, "http://keep.ui")
+			attachment, err := builder.BuildProcessingAttachment(attachmentJSON, tt.action)
+			require.NoError(t, err)
 
-			assert.Equal(t, "#808080", attachment.Color, "loading attachment should have gray color")
-			assert.Equal(t, tt.alertName, attachment.Title)
-			assert.Contains(t, attachment.TitleLink, tt.fingerprint)
+			assert.Equal(t, "#CC0000", attachment.Color, "should preserve original color")
+			assert.Equal(t, "🔴 Test Alert", attachment.Title, "should preserve original title")
+			assert.Contains(t, attachment.TitleLink, "fp-123", "should preserve title link")
+			assert.Len(t, attachment.Fields, 1, "should preserve fields")
 			assert.Len(t, attachment.Actions, 1, "should have exactly one button")
 			assert.Equal(t, "processing", attachment.Actions[0].ID)
 			assert.Equal(t, "Processing...", attachment.Actions[0].Name)
@@ -547,13 +574,33 @@ func TestBuildLoadingAttachment(t *testing.T) {
 	}
 }
 
+func TestBuildProcessingAttachment_InvalidJSON(t *testing.T) {
+	fileConfig := &config.FileConfig{
+		Message: config.MessageConfig{
+			Colors: map[string]string{},
+			Emoji:  map[string]string{},
+		},
+		Labels: config.LabelsConfig{
+			Grouping: config.LabelGroupingConfig{},
+		},
+	}
+
+	builder := NewBuilder(fileConfig)
+
+	_, err := builder.BuildProcessingAttachment("invalid json", "acknowledge")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "deserialize attachment")
+}
+
 func TestBuildFiringAttachmentHasButtonStyles(t *testing.T) {
 	fileConfig := &config.FileConfig{
 		Message: config.MessageConfig{
 			Colors: map[string]string{"high": "#FF6600"},
 			Emoji:  map[string]string{"high": "🟠"},
 		},
-		Labels: config.LabelsConfig{},
+		Labels: config.LabelsConfig{
+			Grouping: config.LabelGroupingConfig{},
+		},
 	}
 
 	builder := NewBuilder(fileConfig)
@@ -588,7 +635,9 @@ func TestBuildAcknowledgedAttachmentHasButtonStyles(t *testing.T) {
 			Colors: map[string]string{"acknowledged": "#FFA500"},
 			Emoji:  map[string]string{},
 		},
-		Labels: config.LabelsConfig{},
+		Labels: config.LabelsConfig{
+			Grouping: config.LabelGroupingConfig{},
+		},
 	}
 
 	builder := NewBuilder(fileConfig)
@@ -615,4 +664,385 @@ func TestBuildAcknowledgedAttachmentHasButtonStyles(t *testing.T) {
 	assert.Equal(t, "default", attachment.Actions[0].Style, "unacknowledge button should have default style")
 	assert.Equal(t, "resolve", attachment.Actions[1].ID)
 	assert.Equal(t, "success", attachment.Actions[1].Style, "resolve button should have success style")
+}
+
+func boolPtr(b bool) *bool {
+	return &b
+}
+
+func TestBuildFiringAttachment_SeverityFieldDisabled(t *testing.T) {
+	fileConfig := &config.FileConfig{
+		Message: config.MessageConfig{
+			Colors: map[string]string{"critical": "#CC0000"},
+			Emoji:  map[string]string{"critical": "🔴"},
+			Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
+			Fields: config.FieldsConfig{
+				ShowSeverity: boolPtr(false),
+			},
+		},
+		Labels: config.LabelsConfig{
+			Display:  []string{"host"},
+			Exclude:  []string{},
+			Rename:   map[string]string{},
+			Grouping: config.LabelGroupingConfig{},
+		},
+	}
+
+	builder := NewBuilder(fileConfig)
+
+	severity, err := alert.NewSeverity("critical")
+	require.NoError(t, err)
+
+	fingerprint := alert.RestoreFingerprint("test-fingerprint-123")
+	status := alert.RestoreStatus(alert.StatusFiring)
+
+	testAlert := alert.RestoreAlert(
+		fingerprint,
+		"High CPU Usage",
+		severity,
+		status,
+		"CPU usage exceeded 90%",
+		"prometheus",
+		map[string]string{"host": "server-1"},
+		time.Time{},
+	)
+
+	attachment := builder.BuildFiringAttachment(testAlert, "http://callback.url", "http://keep.ui")
+
+	for _, field := range attachment.Fields {
+		assert.NotEqual(t, "Severity", field.Title, "Severity field should not appear when ShowSeverity is false")
+	}
+
+	var foundHost bool
+	for _, field := range attachment.Fields {
+		if field.Title == "host" {
+			foundHost = true
+			break
+		}
+	}
+	assert.True(t, foundHost, "should still have display labels")
+}
+
+func TestBuildFiringAttachment_DescriptionFieldDisabled(t *testing.T) {
+	fileConfig := &config.FileConfig{
+		Message: config.MessageConfig{
+			Colors: map[string]string{"warning": "#EDA200"},
+			Emoji:  map[string]string{"warning": "🟡"},
+			Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
+			Fields: config.FieldsConfig{
+				ShowDescription: boolPtr(false),
+			},
+		},
+		Labels: config.LabelsConfig{
+			Display:  []string{"host"},
+			Exclude:  []string{},
+			Rename:   map[string]string{},
+			Grouping: config.LabelGroupingConfig{},
+		},
+	}
+
+	builder := NewBuilder(fileConfig)
+
+	severity, err := alert.NewSeverity("warning")
+	require.NoError(t, err)
+
+	fingerprint := alert.RestoreFingerprint("test-fingerprint-456")
+	status := alert.RestoreStatus(alert.StatusFiring)
+
+	testAlert := alert.RestoreAlert(
+		fingerprint,
+		"Disk Space Low",
+		severity,
+		status,
+		"Disk usage exceeded 85%",
+		"prometheus",
+		map[string]string{"host": "server-2"},
+		time.Time{},
+	)
+
+	attachment := builder.BuildFiringAttachment(testAlert, "http://callback.url", "http://keep.ui")
+
+	for _, field := range attachment.Fields {
+		assert.NotEqual(t, "Description", field.Title, "Description field should not appear when ShowDescription is false")
+	}
+
+	var foundSeverity bool
+	for _, field := range attachment.Fields {
+		if field.Title == "Severity" {
+			foundSeverity = true
+			break
+		}
+	}
+	assert.True(t, foundSeverity, "should still have Severity field")
+}
+
+func TestBuildFiringAttachment_SeverityPositions(t *testing.T) {
+	tests := []struct {
+		name             string
+		severityPosition string
+		displayLabels    []string
+		labels           map[string]string
+		expectedPosition string
+	}{
+		{
+			name:             "first - Severity should be first field",
+			severityPosition: "first",
+			displayLabels:    []string{"host", "service"},
+			labels:           map[string]string{"host": "server-1", "service": "api"},
+			expectedPosition: "first",
+		},
+		{
+			name:             "after_display - Severity should appear after display fields",
+			severityPosition: "after_display",
+			displayLabels:    []string{"host", "service"},
+			labels:           map[string]string{"host": "server-1", "service": "api"},
+			expectedPosition: "after_display",
+		},
+		{
+			name:             "last - Severity should be last field",
+			severityPosition: "last",
+			displayLabels:    []string{"host", "service"},
+			labels:           map[string]string{"host": "server-1", "service": "api"},
+			expectedPosition: "last",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fileConfig := &config.FileConfig{
+				Message: config.MessageConfig{
+					Colors: map[string]string{"high": "#FF6600"},
+					Emoji:  map[string]string{"high": "🟠"},
+					Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
+					Fields: config.FieldsConfig{
+						SeverityPosition: tt.severityPosition,
+					},
+				},
+				Labels: config.LabelsConfig{
+					Display:  tt.displayLabels,
+					Exclude:  []string{},
+					Rename:   map[string]string{},
+					Grouping: config.LabelGroupingConfig{},
+				},
+			}
+
+			builder := NewBuilder(fileConfig)
+
+			severity, err := alert.NewSeverity("high")
+			require.NoError(t, err)
+
+			fingerprint := alert.RestoreFingerprint("test-fp-position")
+			status := alert.RestoreStatus(alert.StatusFiring)
+
+			testAlert := alert.RestoreAlert(
+				fingerprint,
+				"Test Alert",
+				severity,
+				status,
+				"",
+				"prometheus",
+				tt.labels,
+				time.Time{},
+			)
+
+			attachment := builder.BuildFiringAttachment(testAlert, "http://callback.url", "http://keep.ui")
+
+			severityIndex := -1
+			for i, field := range attachment.Fields {
+				if field.Title == "Severity" {
+					severityIndex = i
+					break
+				}
+			}
+
+			require.NotEqual(t, -1, severityIndex, "Severity field should exist")
+
+			switch tt.expectedPosition {
+			case "first":
+				assert.Equal(t, 0, severityIndex, "Severity should be at index 0 for position 'first'")
+			case "after_display":
+				displayCount := 0
+				for _, label := range tt.displayLabels {
+					if _, ok := tt.labels[label]; ok {
+						displayCount++
+					}
+				}
+				assert.Equal(t, displayCount, severityIndex, "Severity should be at index %d (after display fields) for position 'after_display'", displayCount)
+			case "last":
+				assert.Equal(t, len(attachment.Fields)-1, severityIndex, "Severity should be at last index for position 'last'")
+			}
+		})
+	}
+}
+
+func TestBuildFieldsWithGrouping(t *testing.T) {
+	tests := []struct {
+		name           string
+		labels         map[string]string
+		groupingConfig config.LabelGroupingConfig
+		displayLabels  []string
+		expectedGroups []string
+		expectedLabels bool
+	}{
+		{
+			name: "topology labels grouped when threshold met",
+			labels: map[string]string{
+				"topology_region": "us-east",
+				"topology_zone":   "zone-a",
+				"other_label":     "value",
+			},
+			groupingConfig: config.LabelGroupingConfig{
+				Enabled:   true,
+				Threshold: 2,
+				Groups: []config.LabelGroupRule{
+					{Prefixes: []string{"topology_"}, GroupName: "Topology", Priority: 100},
+				},
+			},
+			displayLabels:  []string{},
+			expectedGroups: []string{"Topology"},
+			expectedLabels: true,
+		},
+		{
+			name: "below threshold moves to ungrouped",
+			labels: map[string]string{
+				"topology_region": "us-east",
+				"other_label":     "value",
+			},
+			groupingConfig: config.LabelGroupingConfig{
+				Enabled:   true,
+				Threshold: 2,
+				Groups: []config.LabelGroupRule{
+					{Prefixes: []string{"topology_"}, GroupName: "Topology", Priority: 100},
+				},
+			},
+			displayLabels:  []string{},
+			expectedGroups: []string{},
+			expectedLabels: true,
+		},
+		{
+			name: "multiple groups with priority ordering",
+			labels: map[string]string{
+				"topology_region":    "us-east",
+				"topology_zone":      "zone-a",
+				"kubernetes_io_node": "node-1",
+				"kubernetes_io_zone": "k8s-zone",
+			},
+			groupingConfig: config.LabelGroupingConfig{
+				Enabled:   true,
+				Threshold: 2,
+				Groups: []config.LabelGroupRule{
+					{Prefixes: []string{"topology_"}, GroupName: "Topology", Priority: 100},
+					{Prefixes: []string{"kubernetes_io_"}, GroupName: "Kubernetes", Priority: 90},
+				},
+			},
+			displayLabels:  []string{},
+			expectedGroups: []string{"Topology", "Kubernetes"},
+			expectedLabels: false,
+		},
+		{
+			name: "display labels not grouped",
+			labels: map[string]string{
+				"alertgroup":      "infrastructure",
+				"topology_region": "us-east",
+				"topology_zone":   "zone-a",
+			},
+			groupingConfig: config.LabelGroupingConfig{
+				Enabled:   true,
+				Threshold: 2,
+				Groups: []config.LabelGroupRule{
+					{Prefixes: []string{"topology_"}, GroupName: "Topology", Priority: 100},
+				},
+			},
+			displayLabels:  []string{"alertgroup"},
+			expectedGroups: []string{"Topology"},
+			expectedLabels: false,
+		},
+		{
+			name: "grouping disabled shows no groups",
+			labels: map[string]string{
+				"topology_region": "us-east",
+				"topology_zone":   "zone-a",
+			},
+			groupingConfig: config.LabelGroupingConfig{
+				Enabled: false,
+			},
+			displayLabels:  []string{},
+			expectedGroups: []string{},
+			expectedLabels: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fileConfig := &config.FileConfig{
+				Message: config.MessageConfig{
+					Colors: map[string]string{"info": "#0066FF"},
+					Emoji:  map[string]string{"info": "🔵"},
+				},
+				Labels: config.LabelsConfig{
+					Display:  tt.displayLabels,
+					Exclude:  []string{},
+					Rename:   map[string]string{},
+					Grouping: tt.groupingConfig,
+				},
+			}
+
+			builder := NewBuilder(fileConfig)
+
+			severity, _ := alert.NewSeverity("info")
+			fingerprint := alert.RestoreFingerprint("test-fp")
+			status := alert.RestoreStatus(alert.StatusFiring)
+
+			testAlert := alert.RestoreAlert(
+				fingerprint,
+				"Test Alert",
+				severity,
+				status,
+				"",
+				"prometheus",
+				tt.labels,
+				time.Time{},
+			)
+
+			attachment := builder.BuildFiringAttachment(testAlert, "http://callback.url", "http://keep.ui")
+
+			// Check expected groups exist
+			for _, expectedGroup := range tt.expectedGroups {
+				found := false
+				for _, field := range attachment.Fields {
+					if field.Title == expectedGroup {
+						found = true
+						break
+					}
+				}
+				assert.True(t, found, "expected group %s not found", expectedGroup)
+			}
+
+			// Check Labels field
+			hasLabelsField := false
+			for _, field := range attachment.Fields {
+				if field.Title == "Labels" {
+					hasLabelsField = true
+					break
+				}
+			}
+			assert.Equal(t, tt.expectedLabels, hasLabelsField, "Labels field presence mismatch")
+
+			// Verify group ordering by priority
+			if len(tt.expectedGroups) > 1 {
+				var groupIndices []int
+				for _, expectedGroup := range tt.expectedGroups {
+					for i, field := range attachment.Fields {
+						if field.Title == expectedGroup {
+							groupIndices = append(groupIndices, i)
+							break
+						}
+					}
+				}
+				for i := 1; i < len(groupIndices); i++ {
+					assert.Less(t, groupIndices[i-1], groupIndices[i], "groups should be ordered by priority")
+				}
+			}
+		})
+	}
 }

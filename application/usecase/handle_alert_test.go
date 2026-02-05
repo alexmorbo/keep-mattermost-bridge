@@ -124,11 +124,11 @@ func (m *mockMessageBuilder) BuildResolvedAttachment(a *alert.Alert, keepUIURL s
 	}
 }
 
-func (m *mockMessageBuilder) BuildLoadingAttachment(action, alertName, fingerprint, keepUIURL string) post.Attachment {
+func (m *mockMessageBuilder) BuildProcessingAttachment(attachmentJSON, action string) (post.Attachment, error) {
 	return post.Attachment{
 		Color: "#808080",
-		Title: alertName,
-	}
+		Title: "Processing",
+	}, nil
 }
 
 func (m *mockMessageBuilder) BuildErrorAttachment(alertName, fingerprint, keepUIURL, errorMsg string) post.Attachment {

@@ -15,18 +15,6 @@ import (
 	"github.com/alexmorbo/keep-mattermost-bridge/pkg/logger"
 )
 
-const (
-	ActionAcknowledge   = "acknowledge"
-	ActionResolve       = "resolve"
-	ActionUnacknowledge = "unacknowledge"
-)
-
-const (
-	ButtonStyleDefault = "default"
-	ButtonStyleSuccess = "success"
-	ButtonStyleDanger  = "danger"
-)
-
 type HandleCallbackUseCase struct {
 	postRepo    post.Repository
 	keepClient  port.KeepClient
@@ -62,9 +50,10 @@ func NewHandleCallbackUseCase(
 }
 
 func (uc *HandleCallbackUseCase) ExecuteImmediate(input dto.MattermostCallbackInput) (*dto.CallbackOutput, error) {
-	action := input.Context["action"]
-	fingerprintStr := input.Context["fingerprint"]
-	alertName := input.Context["alert_name"]
+	action := input.Context[post.ContextKeyAction]
+	fingerprintStr := input.Context[post.ContextKeyFingerprint]
+	alertName := input.Context[post.ContextKeyAlertName]
+	attachmentJSON := input.Context[post.ContextKeyAttachmentJSON]
 
 	uc.logger.Info("Callback received (immediate phase)",
 		logger.ApplicationFields("callback_received",
@@ -76,9 +65,9 @@ func (uc *HandleCallbackUseCase) ExecuteImmediate(input dto.MattermostCallbackIn
 	)
 
 	validActions := map[string]bool{
-		ActionAcknowledge:   true,
-		ActionResolve:       true,
-		ActionUnacknowledge: true,
+		post.ActionAcknowledge:   true,
+		post.ActionResolve:       true,
+		post.ActionUnacknowledge: true,
 	}
 	metricAction := "unknown"
 	if validActions[action] {
@@ -94,17 +83,24 @@ func (uc *HandleCallbackUseCase) ExecuteImmediate(input dto.MattermostCallbackIn
 		return nil, fmt.Errorf("missing required context field: alert_name")
 	}
 
-	loadingAttachment := uc.msgBuilder.BuildLoadingAttachment(action, alertName, fingerprintStr, uc.keepUIURL)
+	if attachmentJSON == "" {
+		return nil, fmt.Errorf("missing required context field: attachment_json")
+	}
+
+	processingAttachment, err := uc.msgBuilder.BuildProcessingAttachment(attachmentJSON, action)
+	if err != nil {
+		return nil, fmt.Errorf("build processing attachment: %w", err)
+	}
 
 	return &dto.CallbackOutput{
-		Attachment: dto.NewAttachmentDTO(loadingAttachment),
+		Attachment: dto.NewAttachmentDTO(processingAttachment),
 	}, nil
 }
 
 func (uc *HandleCallbackUseCase) ExecuteAsync(input dto.MattermostCallbackInput) {
-	action := input.Context["action"]
-	fingerprintStr := input.Context["fingerprint"]
-	alertName := input.Context["alert_name"]
+	action := input.Context[post.ContextKeyAction]
+	fingerprintStr := input.Context[post.ContextKeyFingerprint]
+	alertName := input.Context[post.ContextKeyAlertName]
 
 	uc.wg.Add(1)
 	go func() {
@@ -153,7 +149,7 @@ func (uc *HandleCallbackUseCase) ExecuteAsync(input dto.MattermostCallbackInput)
 		}
 
 		statusStr := action
-		if action == ActionAcknowledge {
+		if action == post.ActionAcknowledge {
 			statusStr = alert.StatusAcknowledged
 		}
 
@@ -171,11 +167,11 @@ func (uc *HandleCallbackUseCase) ExecuteAsync(input dto.MattermostCallbackInput)
 		)
 
 		switch action {
-		case ActionAcknowledge:
+		case post.ActionAcknowledge:
 			uc.handleAcknowledgeAsync(asyncCtx, a, fingerprint, username, input.PostID, input.ChannelID)
-		case ActionResolve:
+		case post.ActionResolve:
 			uc.handleResolveAsync(asyncCtx, a, fingerprint, username, input.PostID, input.ChannelID)
-		case ActionUnacknowledge:
+		case post.ActionUnacknowledge:
 			uc.handleUnacknowledgeAsync(asyncCtx, a, fingerprint, username, input.PostID, input.ChannelID)
 		default:
 			uc.logger.Error("Unknown action in async phase",

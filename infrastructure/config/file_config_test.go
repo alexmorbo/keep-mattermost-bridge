@@ -698,3 +698,342 @@ func TestServerConfigAddr(t *testing.T) {
 		})
 	}
 }
+
+func TestIsLabelGroupingEnabled(t *testing.T) {
+	t.Run("returns true when enabled", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Grouping: LabelGroupingConfig{
+					Enabled: true,
+				},
+			},
+		}
+		assert.True(t, cfg.IsLabelGroupingEnabled())
+	})
+
+	t.Run("returns false when disabled", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Grouping: LabelGroupingConfig{
+					Enabled: false,
+				},
+			},
+		}
+		assert.False(t, cfg.IsLabelGroupingEnabled())
+	})
+
+	t.Run("returns false by default", func(t *testing.T) {
+		cfg := &FileConfig{}
+		assert.False(t, cfg.IsLabelGroupingEnabled())
+	})
+}
+
+func TestGetLabelGroupingThreshold(t *testing.T) {
+	t.Run("returns configured threshold", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Grouping: LabelGroupingConfig{
+					Threshold: 5,
+				},
+			},
+		}
+		assert.Equal(t, 5, cfg.GetLabelGroupingThreshold())
+	})
+
+	t.Run("returns default 2 when threshold is 0 after applyDefaults", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Grouping: LabelGroupingConfig{
+					Threshold: 0,
+				},
+			},
+		}
+		cfg.applyDefaults()
+		assert.Equal(t, 2, cfg.GetLabelGroupingThreshold())
+	})
+
+	t.Run("returns default 2 for empty config after applyDefaults", func(t *testing.T) {
+		cfg := &FileConfig{}
+		cfg.applyDefaults()
+		assert.Equal(t, 2, cfg.GetLabelGroupingThreshold())
+	})
+}
+
+func TestGetLabelGroups(t *testing.T) {
+	t.Run("returns configured groups", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Grouping: LabelGroupingConfig{
+					Groups: []LabelGroupRule{
+						{Prefixes: []string{"topology_"}, GroupName: "Topology", Priority: 100},
+						{Prefixes: []string{"kubernetes_io_"}, GroupName: "Kubernetes", Priority: 90},
+					},
+				},
+			},
+		}
+
+		groups := cfg.GetLabelGroups()
+		require.Len(t, groups, 2)
+		assert.Equal(t, "Topology", groups[0].GroupName)
+		assert.Equal(t, 100, groups[0].Priority)
+		assert.Equal(t, []string{"topology_"}, groups[0].Prefixes)
+		assert.Equal(t, "Kubernetes", groups[1].GroupName)
+	})
+
+	t.Run("returns empty slice for no groups", func(t *testing.T) {
+		cfg := &FileConfig{}
+		groups := cfg.GetLabelGroups()
+		assert.Empty(t, groups)
+	})
+
+	t.Run("returns groups with multiple prefixes", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Grouping: LabelGroupingConfig{
+					Groups: []LabelGroupRule{
+						{
+							Prefixes:  []string{"kubernetes_io_", "beta_kubernetes_io_"},
+							GroupName: "Kubernetes",
+							Priority:  90,
+						},
+					},
+				},
+			},
+		}
+
+		groups := cfg.GetLabelGroups()
+		require.Len(t, groups, 1)
+		assert.Len(t, groups[0].Prefixes, 2)
+	})
+}
+
+func TestLoadFromFileWithGroupingConfig(t *testing.T) {
+	yamlContent := `
+labels:
+  grouping:
+    enabled: true
+    threshold: 3
+    groups:
+      - prefixes:
+          - "topology_"
+        group_name: "Topology"
+        priority: 100
+      - prefixes:
+          - "kubernetes_io_"
+          - "beta_kubernetes_io_"
+        group_name: "Kubernetes"
+        priority: 90
+`
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	err := os.WriteFile(configPath, []byte(yamlContent), 0600)
+	require.NoError(t, err)
+
+	cfg, err := LoadFromFile(configPath)
+	require.NoError(t, err)
+
+	assert.True(t, cfg.IsLabelGroupingEnabled())
+	assert.Equal(t, 3, cfg.GetLabelGroupingThreshold())
+
+	groups := cfg.GetLabelGroups()
+	require.Len(t, groups, 2)
+	assert.Equal(t, "Topology", groups[0].GroupName)
+	assert.Equal(t, "Kubernetes", groups[1].GroupName)
+}
+
+func TestShowSeverityField(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   *FileConfig
+		expected bool
+	}{
+		{
+			name:     "nil pointer returns true (default)",
+			config:   &FileConfig{},
+			expected: true,
+		},
+		{
+			name: "explicit true returns true",
+			config: &FileConfig{
+				Message: MessageConfig{
+					Fields: FieldsConfig{
+						ShowSeverity: boolPtr(true),
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "explicit false returns false",
+			config: &FileConfig{
+				Message: MessageConfig{
+					Fields: FieldsConfig{
+						ShowSeverity: boolPtr(false),
+					},
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.config.ShowSeverityField()
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestShowDescriptionField(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   *FileConfig
+		expected bool
+	}{
+		{
+			name:     "nil pointer returns true (default)",
+			config:   &FileConfig{},
+			expected: true,
+		},
+		{
+			name: "explicit true returns true",
+			config: &FileConfig{
+				Message: MessageConfig{
+					Fields: FieldsConfig{
+						ShowDescription: boolPtr(true),
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "explicit false returns false",
+			config: &FileConfig{
+				Message: MessageConfig{
+					Fields: FieldsConfig{
+						ShowDescription: boolPtr(false),
+					},
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.config.ShowDescriptionField()
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestSeverityFieldPosition(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   *FileConfig
+		expected string
+	}{
+		{
+			name:     "empty string returns first (default)",
+			config:   &FileConfig{},
+			expected: "first",
+		},
+		{
+			name: "first returns first",
+			config: &FileConfig{
+				Message: MessageConfig{
+					Fields: FieldsConfig{
+						SeverityPosition: "first",
+					},
+				},
+			},
+			expected: "first",
+		},
+		{
+			name: "after_display returns after_display",
+			config: &FileConfig{
+				Message: MessageConfig{
+					Fields: FieldsConfig{
+						SeverityPosition: "after_display",
+					},
+				},
+			},
+			expected: "after_display",
+		},
+		{
+			name: "last returns last",
+			config: &FileConfig{
+				Message: MessageConfig{
+					Fields: FieldsConfig{
+						SeverityPosition: "last",
+					},
+				},
+			},
+			expected: "last",
+		},
+		{
+			name: "invalid value returns first (fallback)",
+			config: &FileConfig{
+				Message: MessageConfig{
+					Fields: FieldsConfig{
+						SeverityPosition: "invalid",
+					},
+				},
+			},
+			expected: "first",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.config.SeverityFieldPosition()
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestDefaultDisplayLabels(t *testing.T) {
+	cfg := &FileConfig{}
+	cfg.applyDefaults()
+
+	expectedLabels := []string{
+		"alertgroup",
+		"container",
+		"node",
+		"namespace",
+		"pod",
+	}
+
+	assert.Equal(t, expectedLabels, cfg.Labels.Display)
+	assert.Len(t, cfg.Labels.Display, 5)
+}
+
+func TestDefaultExcludeLabels(t *testing.T) {
+	cfg := &FileConfig{}
+	cfg.applyDefaults()
+
+	expectedLabels := []string{
+		"__name__",
+		"prometheus",
+		"alertname",
+		"job",
+		"instance",
+	}
+
+	assert.Equal(t, expectedLabels, cfg.Labels.Exclude)
+	assert.Len(t, cfg.Labels.Exclude, 5)
+}
+
+func TestDefaultRenameLabels(t *testing.T) {
+	cfg := &FileConfig{}
+	cfg.applyDefaults()
+
+	assert.NotNil(t, cfg.Labels.Rename)
+	assert.Equal(t, "Alert Group", cfg.Labels.Rename["alertgroup"])
+	assert.Len(t, cfg.Labels.Rename, 1)
+}
+
+func boolPtr(b bool) *bool {
+	return &b
+}
