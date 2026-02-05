@@ -212,12 +212,37 @@ func (m *mockChannelResolver) ChannelIDForSeverity(severity string) string {
 	return m.channel
 }
 
-func setupHandleAlertUseCase() (*HandleAlertUseCase, *mockPostRepository, *mockMattermostClient, *mockKeepClientForAlert, *mockMessageBuilder) {
+type mockUserMapperForAlert struct {
+	mapping map[string]string
+}
+
+func newMockUserMapperForAlert() *mockUserMapperForAlert {
+	return &mockUserMapperForAlert{
+		mapping: make(map[string]string),
+	}
+}
+
+func (m *mockUserMapperForAlert) GetKeepUsername(mattermostUsername string) (string, bool) {
+	keepUser, ok := m.mapping[mattermostUsername]
+	return keepUser, ok
+}
+
+func (m *mockUserMapperForAlert) GetMattermostUsername(keepUsername string) (string, bool) {
+	for mmUser, keepUser := range m.mapping {
+		if keepUser == keepUsername {
+			return mmUser, true
+		}
+	}
+	return "", false
+}
+
+func setupHandleAlertUseCase() (*HandleAlertUseCase, *mockPostRepository, *mockMattermostClient, *mockKeepClientForAlert, *mockMessageBuilder, *mockUserMapperForAlert) {
 	postRepo := newMockPostRepository()
 	mmClient := newMockMattermostClient()
 	keepClient := newMockKeepClientForAlert()
 	msgBuilder := &mockMessageBuilder{}
 	channelResolver := newMockChannelResolver()
+	userMapper := newMockUserMapperForAlert()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	uc := NewHandleAlertUseCase(
@@ -226,16 +251,17 @@ func setupHandleAlertUseCase() (*HandleAlertUseCase, *mockPostRepository, *mockM
 		keepClient,
 		msgBuilder,
 		channelResolver,
+		userMapper,
 		"https://keep.example.com",
 		"https://callback.example.com",
 		logger,
 	)
 
-	return uc, postRepo, mmClient, keepClient, msgBuilder
+	return uc, postRepo, mmClient, keepClient, msgBuilder, userMapper
 }
 
 func TestHandleAlertUseCase_NewFiringAlert(t *testing.T) {
-	uc, postRepo, mmClient, _, _ := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -266,7 +292,7 @@ func TestHandleAlertUseCase_NewFiringAlert(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_RefireExistingAlert(t *testing.T) {
-	uc, postRepo, mmClient, _, _ := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	fp, _ := alert.NewFingerprint("fp-12345")
@@ -293,7 +319,7 @@ func TestHandleAlertUseCase_RefireExistingAlert(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_ResolveExistingAlert(t *testing.T) {
-	uc, postRepo, mmClient, _, _ := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	fp, _ := alert.NewFingerprint("fp-12345")
@@ -322,7 +348,7 @@ func TestHandleAlertUseCase_ResolveExistingAlert(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_ResolveWithoutExistingPost(t *testing.T) {
-	uc, postRepo, mmClient, _, _ := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -343,7 +369,7 @@ func TestHandleAlertUseCase_ResolveWithoutExistingPost(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_InvalidFingerprint(t *testing.T) {
-	uc, _, _, _, _ := setupHandleAlertUseCase()
+	uc, _, _, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -363,7 +389,7 @@ func TestHandleAlertUseCase_InvalidFingerprint(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_InvalidSeverity(t *testing.T) {
-	uc, _, _, _, _ := setupHandleAlertUseCase()
+	uc, _, _, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -383,7 +409,7 @@ func TestHandleAlertUseCase_InvalidSeverity(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_MattermostCreatePostError(t *testing.T) {
-	uc, _, mmClient, _, _ := setupHandleAlertUseCase()
+	uc, _, mmClient, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	mmClient.createPostErr = errors.New("mattermost error")
@@ -405,7 +431,7 @@ func TestHandleAlertUseCase_MattermostCreatePostError(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_LabelParsingWithPythonDict(t *testing.T) {
-	uc, postRepo, mmClient, _, _ := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -426,7 +452,7 @@ func TestHandleAlertUseCase_LabelParsingWithPythonDict(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_InvalidLabelsDoesNotFailAlert(t *testing.T) {
-	uc, postRepo, mmClient, _, _ := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -447,7 +473,7 @@ func TestHandleAlertUseCase_InvalidLabelsDoesNotFailAlert(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_RepositorySaveError(t *testing.T) {
-	uc, postRepo, _, _, _ := setupHandleAlertUseCase()
+	uc, postRepo, _, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	postRepo.saveErr = errors.New("database error")
@@ -469,7 +495,7 @@ func TestHandleAlertUseCase_RepositorySaveError(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_RepositoryDeleteError(t *testing.T) {
-	uc, postRepo, _, _, _ := setupHandleAlertUseCase()
+	uc, postRepo, _, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	fp, _ := alert.NewFingerprint("fp-12345")
@@ -494,7 +520,7 @@ func TestHandleAlertUseCase_RepositoryDeleteError(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_AcknowledgedStatusUpdatesPost(t *testing.T) {
-	uc, postRepo, mmClient, keepClient, _ := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, keepClient, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	fp, _ := alert.NewFingerprint("fp-12345")
@@ -527,7 +553,7 @@ func TestHandleAlertUseCase_AcknowledgedStatusUpdatesPost(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_AcknowledgedWithoutExistingPostCreatesPost(t *testing.T) {
-	uc, postRepo, mmClient, _, _ := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -548,7 +574,7 @@ func TestHandleAlertUseCase_AcknowledgedWithoutExistingPostCreatesPost(t *testin
 }
 
 func TestHandleAlertUseCase_ResolveUsesStoredFiringStartTime(t *testing.T) {
-	uc, postRepo, mmClient, _, msgBuilder := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _, msgBuilder, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	storedFiringTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
@@ -578,7 +604,9 @@ func TestHandleAlertUseCase_ResolveUsesStoredFiringStartTime(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_ResolveWithAssigneeShowsInFooter(t *testing.T) {
-	uc, postRepo, mmClient, keepClient, msgBuilder := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, keepClient, msgBuilder, userMapper := setupHandleAlertUseCase()
+	// Set up reverse mapping: Keep user "john.doe@keep" -> Mattermost user "john.doe"
+	userMapper.mapping["john.doe"] = "john.doe@keep"
 	ctx := context.Background()
 
 	fp, _ := alert.NewFingerprint("fp-12345")
@@ -590,7 +618,7 @@ func TestHandleAlertUseCase_ResolveWithAssigneeShowsInFooter(t *testing.T) {
 		Name:        "Test Alert",
 		Status:      "resolved",
 		Severity:    "high",
-		Enrichments: map[string]string{"assignee": "john.doe"},
+		Enrichments: map[string]string{"assignee": "john.doe@keep"}, // Keep username in enrichment
 	}
 
 	input := dto.KeepAlertInput{
@@ -608,13 +636,51 @@ func TestHandleAlertUseCase_ResolveWithAssigneeShowsInFooter(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, mmClient.updatePostCalled)
 	assert.True(t, mmClient.replyToThreadCalled)
+	// Should use reverse-mapped Mattermost username, not Keep username
 	assert.Contains(t, mmClient.lastReplyMessage, "john.doe")
 	assert.Equal(t, "john.doe", msgBuilder.lastResolvedAssignee)
 }
 
-func TestHandleAlertUseCase_RefireAcknowledgedAlertStaysAcknowledged(t *testing.T) {
-	uc, postRepo, mmClient, keepClient, _ := setupHandleAlertUseCase()
+func TestHandleAlertUseCase_ResolveWithUnmappedAssigneeFallsBackToKeepUsername(t *testing.T) {
+	uc, postRepo, mmClient, keepClient, msgBuilder, _ := setupHandleAlertUseCase()
+	// userMapper has no mappings - should fallback to Keep username
 	ctx := context.Background()
+
+	fp, _ := alert.NewFingerprint("fp-12345")
+	existingPost := post.NewPost("existing-post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"), time.Now())
+	postRepo.posts[fp.Value()] = existingPost
+
+	keepClient.alert = &port.KeepAlert{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Status:      "resolved",
+		Severity:    "high",
+		Enrichments: map[string]string{"assignee": "unmapped@keep"},
+	}
+
+	input := dto.KeepAlertInput{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Severity:    "high",
+		Status:      "resolved",
+		Description: "Test description",
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
+	}
+
+	err := uc.Execute(ctx, input)
+
+	require.NoError(t, err)
+	assert.True(t, mmClient.updatePostCalled)
+	// Should use Keep username when no reverse mapping exists
+	assert.Equal(t, "unmapped@keep", msgBuilder.lastResolvedAssignee)
+}
+
+func TestHandleAlertUseCase_RefireAcknowledgedAlertStaysAcknowledged(t *testing.T) {
+	uc, postRepo, mmClient, keepClient, _, userMapper := setupHandleAlertUseCase()
+	ctx := context.Background()
+	// Set up reverse mapping: Keep user -> Mattermost user
+	userMapper.mapping["john.doe"] = "john.doe@keep"
 
 	fp, _ := alert.NewFingerprint("fp-12345")
 	existingPost := post.NewPost("existing-post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"), time.Now())
@@ -625,7 +691,7 @@ func TestHandleAlertUseCase_RefireAcknowledgedAlertStaysAcknowledged(t *testing.
 		Name:        "Test Alert",
 		Status:      "acknowledged",
 		Severity:    "high",
-		Enrichments: map[string]string{"assignee": "john.doe", "status": "acknowledged"},
+		Enrichments: map[string]string{"assignee": "john.doe@keep", "status": "acknowledged"},
 	}
 
 	input := dto.KeepAlertInput{

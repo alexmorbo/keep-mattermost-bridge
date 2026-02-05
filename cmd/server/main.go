@@ -89,7 +89,8 @@ func main() {
 		mmClient,
 		keepClient,
 		msgBuilder,
-		fileCfg,
+		fileCfg, // ChannelResolver - routes alerts to channels by severity
+		fileCfg, // UserMapper - maps between Mattermost and Keep usernames
 		cfg.Keep.UIURL,
 		cfg.CallbackURL,
 		log.With("component", "handle_alert_usecase"),

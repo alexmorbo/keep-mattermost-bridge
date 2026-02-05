@@ -779,13 +779,13 @@ func TestGetKeepUsername(t *testing.T) {
 		cfg := &FileConfig{
 			Users: UsersConfig{
 				Mapping: map[string]string{
-					"alexmorbo":    "alex.keep",
+					"johndoe":      "alex.keep",
 					"another_user": "another.keep",
 				},
 			},
 		}
 
-		keepUser, ok := cfg.GetKeepUsername("alexmorbo")
+		keepUser, ok := cfg.GetKeepUsername("johndoe")
 		assert.True(t, ok)
 		assert.Equal(t, "alex.keep", keepUser)
 
@@ -798,7 +798,7 @@ func TestGetKeepUsername(t *testing.T) {
 		cfg := &FileConfig{
 			Users: UsersConfig{
 				Mapping: map[string]string{
-					"alexmorbo": "alex.keep",
+					"johndoe": "alex.keep",
 				},
 			},
 		}
@@ -811,7 +811,7 @@ func TestGetKeepUsername(t *testing.T) {
 	t.Run("returns false when mapping is nil", func(t *testing.T) {
 		cfg := &FileConfig{}
 
-		keepUser, ok := cfg.GetKeepUsername("alexmorbo")
+		keepUser, ok := cfg.GetKeepUsername("johndoe")
 		assert.False(t, ok)
 		assert.Equal(t, "", keepUser)
 	})
@@ -823,7 +823,7 @@ func TestGetKeepUsername(t *testing.T) {
 			},
 		}
 
-		keepUser, ok := cfg.GetKeepUsername("alexmorbo")
+		keepUser, ok := cfg.GetKeepUsername("johndoe")
 		assert.False(t, ok)
 		assert.Equal(t, "", keepUser)
 	})
@@ -832,12 +832,12 @@ func TestGetKeepUsername(t *testing.T) {
 		cfg := &FileConfig{
 			Users: UsersConfig{
 				Mapping: map[string]string{
-					"alexmorbo": "",
+					"johndoe": "",
 				},
 			},
 		}
 
-		keepUser, ok := cfg.GetKeepUsername("alexmorbo")
+		keepUser, ok := cfg.GetKeepUsername("johndoe")
 		assert.True(t, ok)
 		assert.Equal(t, "", keepUser)
 	})
@@ -869,6 +869,49 @@ func TestGetKeepUsername(t *testing.T) {
 		keepUser, ok = cfg.GetKeepUsername("user@domain")
 		assert.True(t, ok)
 		assert.Equal(t, "keepuser", keepUser)
+	})
+}
+
+func TestGetMattermostUsername(t *testing.T) {
+	t.Run("returns Mattermost username for existing Keep user", func(t *testing.T) {
+		cfg := &FileConfig{
+			Users: UsersConfig{
+				Mapping: map[string]string{
+					"johndoe":      "johndoe@keep",
+					"another_user": "another@keep",
+				},
+			},
+		}
+
+		mmUser, ok := cfg.GetMattermostUsername("johndoe@keep")
+		assert.True(t, ok)
+		assert.Equal(t, "johndoe", mmUser)
+
+		mmUser, ok = cfg.GetMattermostUsername("another@keep")
+		assert.True(t, ok)
+		assert.Equal(t, "another_user", mmUser)
+	})
+
+	t.Run("returns false for unknown Keep user", func(t *testing.T) {
+		cfg := &FileConfig{
+			Users: UsersConfig{
+				Mapping: map[string]string{
+					"johndoe": "johndoe@keep",
+				},
+			},
+		}
+
+		mmUser, ok := cfg.GetMattermostUsername("unknown@keep")
+		assert.False(t, ok)
+		assert.Empty(t, mmUser)
+	})
+
+	t.Run("returns false for nil mapping", func(t *testing.T) {
+		cfg := &FileConfig{}
+
+		mmUser, ok := cfg.GetMattermostUsername("any@keep")
+		assert.False(t, ok)
+		assert.Empty(t, mmUser)
 	})
 }
 

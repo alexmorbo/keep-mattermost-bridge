@@ -179,6 +179,15 @@ func (m *mockUserMapper) GetKeepUsername(mattermostUsername string) (string, boo
 	return keepUser, ok
 }
 
+func (m *mockUserMapper) GetMattermostUsername(keepUsername string) (string, bool) {
+	for mmUser, keepUser := range m.mapping {
+		if keepUser == keepUsername {
+			return mmUser, true
+		}
+	}
+	return "", false
+}
+
 type mockMattermostClientCallback struct {
 	getUserErr         error
 	getUserFunc        func(ctx context.Context, userID string) (string, error)

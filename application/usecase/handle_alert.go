@@ -21,6 +21,7 @@ type HandleAlertUseCase struct {
 	keepClient      port.KeepClient
 	msgBuilder      port.MessageBuilder
 	channelResolver port.ChannelResolver
+	userMapper      port.UserMapper
 	keepUIURL       string
 	callbackURL     string
 	logger          *slog.Logger
@@ -32,6 +33,7 @@ func NewHandleAlertUseCase(
 	keepClient port.KeepClient,
 	msgBuilder port.MessageBuilder,
 	channelResolver port.ChannelResolver,
+	userMapper port.UserMapper,
 	keepUIURL string,
 	callbackURL string,
 	logger *slog.Logger,
@@ -42,6 +44,7 @@ func NewHandleAlertUseCase(
 		keepClient:      keepClient,
 		msgBuilder:      msgBuilder,
 		channelResolver: channelResolver,
+		userMapper:      userMapper,
 		keepUIURL:       keepUIURL,
 		callbackURL:     callbackURL,
 		logger:          logger,
@@ -128,13 +131,16 @@ func (uc *HandleAlertUseCase) handleFiring(ctx context.Context, a *alert.Alert, 
 		)
 	}
 
-	var assignee string
 	var wasAcknowledged bool
-	if keepAlert != nil && keepAlert.Enrichments != nil {
-		assignee = keepAlert.Enrichments["assignee"]
+	var assignee string
+	if keepAlert != nil {
+		assignee = uc.resolveAssigneeUsername(keepAlert.Enrichments)
 		// Check both enrichment status and alert status from Keep
 		// Keep may report acknowledged in either field depending on the source
-		wasAcknowledged = keepAlert.Enrichments["status"] == "acknowledged" || keepAlert.Status == "acknowledged"
+		if keepAlert.Enrichments != nil {
+			wasAcknowledged = keepAlert.Enrichments["status"] == "acknowledged"
+		}
+		wasAcknowledged = wasAcknowledged || keepAlert.Status == "acknowledged"
 	}
 
 	if wasAcknowledged || assignee != "" {
@@ -255,8 +261,8 @@ func (uc *HandleAlertUseCase) handleResolved(ctx context.Context, a *alert.Alert
 	}
 
 	var assignee string
-	if keepAlert != nil && keepAlert.Enrichments != nil {
-		assignee = keepAlert.Enrichments["assignee"]
+	if keepAlert != nil {
+		assignee = uc.resolveAssigneeUsername(keepAlert.Enrichments)
 	}
 
 	resolvedAlert := alert.RestoreAlert(
@@ -320,8 +326,8 @@ func (uc *HandleAlertUseCase) handleAcknowledged(ctx context.Context, a *alert.A
 	}
 
 	var assignee string
-	if keepAlert != nil && keepAlert.Enrichments != nil {
-		assignee = keepAlert.Enrichments["assignee"]
+	if keepAlert != nil {
+		assignee = uc.resolveAssigneeUsername(keepAlert.Enrichments)
 	}
 
 	alertWithStoredTime := alert.RestoreAlert(
@@ -357,8 +363,8 @@ func (uc *HandleAlertUseCase) createAcknowledgedPost(ctx context.Context, a *ale
 	}
 
 	var assignee string
-	if keepAlert != nil && keepAlert.Enrichments != nil {
-		assignee = keepAlert.Enrichments["assignee"]
+	if keepAlert != nil {
+		assignee = uc.resolveAssigneeUsername(keepAlert.Enrichments)
 	}
 
 	attachment := uc.msgBuilder.BuildAcknowledgedAttachment(a, uc.callbackURL, uc.keepUIURL, assignee)
@@ -387,4 +393,20 @@ func (uc *HandleAlertUseCase) createAcknowledgedPost(ctx context.Context, a *ale
 	alertsPostedCounter(a.Severity().String(), channelID).Inc()
 
 	return nil
+}
+
+// resolveAssigneeUsername converts Keep username from enrichments to Mattermost username for display.
+// Falls back to Keep username if no reverse mapping exists.
+func (uc *HandleAlertUseCase) resolveAssigneeUsername(enrichments map[string]string) string {
+	if enrichments == nil {
+		return ""
+	}
+	keepUser := enrichments["assignee"]
+	if keepUser == "" {
+		return ""
+	}
+	if mmUser, ok := uc.userMapper.GetMattermostUsername(keepUser); ok {
+		return mmUser
+	}
+	return keepUser
 }

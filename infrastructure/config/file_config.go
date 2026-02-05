@@ -260,6 +260,18 @@ func (c *FileConfig) GetKeepUsername(mattermostUsername string) (string, bool) {
 	return keepUser, ok
 }
 
+func (c *FileConfig) GetMattermostUsername(keepUsername string) (string, bool) {
+	if c.Users.Mapping == nil {
+		return "", false
+	}
+	for mmUser, keepUser := range c.Users.Mapping {
+		if keepUser == keepUsername {
+			return mmUser, true
+		}
+	}
+	return "", false
+}
+
 func (c *FileConfig) IsLabelGroupingEnabled() bool {
 	return c.Labels.Grouping.Enabled
 }
