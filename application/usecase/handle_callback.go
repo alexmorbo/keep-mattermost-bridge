@@ -198,23 +198,36 @@ func (uc *HandleCallbackUseCase) updatePostWithError(ctx context.Context, postID
 }
 
 func (uc *HandleCallbackUseCase) enrichAssignee(ctx context.Context, fingerprint, mattermostUsername string) {
-	if keepUser, ok := uc.userMapper.GetKeepUsername(mattermostUsername); ok && keepUser != "" {
-		assigneeEnrichment := map[string]string{EnrichmentKeyAssignee: strings.TrimSpace(keepUser)}
-		// Assignee enrichment persists across alert updates (DisposeOnNewAlert=false)
-		if err := uc.keepClient.EnrichAlert(ctx, fingerprint, assigneeEnrichment, port.EnrichOptions{DisposeOnNewAlert: false}); err != nil {
-			uc.logger.Error("Failed to enrich assignee in Keep",
-				slog.String("fingerprint", fingerprint),
-				slog.String("error", err.Error()),
-			)
-		}
+	var keepUser string
+	if mappedUser, ok := uc.userMapper.GetKeepUsername(mattermostUsername); ok && mappedUser != "" {
+		keepUser = mappedUser
 		uc.logger.Debug("Mapped Mattermost user to Keep user",
 			slog.String("mattermost_user", mattermostUsername),
 			slog.String("keep_user", keepUser),
+		)
+	} else {
+		// Fallback: use Mattermost username directly (no mapping configured)
+		keepUser = mattermostUsername
+		uc.logger.Debug("No Keep user mapping, using Mattermost username",
+			slog.String("mattermost_user", mattermostUsername),
+		)
+	}
+
+	assigneeEnrichment := map[string]string{EnrichmentKeyAssignee: strings.TrimSpace(keepUser)}
+	// Assignee enrichment persists across alert updates (DisposeOnNewAlert=false)
+	if err := uc.keepClient.EnrichAlert(ctx, fingerprint, assigneeEnrichment, port.EnrichOptions{DisposeOnNewAlert: false}); err != nil {
+		uc.logger.Error("Failed to enrich assignee in Keep",
+			slog.String("fingerprint", fingerprint),
+			slog.String("error", err.Error()),
 		)
 	}
 }
 
 func (uc *HandleCallbackUseCase) handleAcknowledgeAsync(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username, postID, channelID string) {
+	// IMPORTANT: Set assignee BEFORE status to avoid race condition.
+	// Status change triggers Keep webhook, and assignee must be set by then.
+	uc.enrichAssignee(ctx, fingerprint.Value(), username)
+
 	// Status enrichment auto-clears when alert re-fires from provider (DisposeOnNewAlert=true)
 	// This ensures resolved alerts from provider override acknowledged status
 	statusEnrichment := map[string]string{EnrichmentKeyStatus: "acknowledged"}
@@ -225,8 +238,6 @@ func (uc *HandleCallbackUseCase) handleAcknowledgeAsync(ctx context.Context, a *
 			slog.String("error", err.Error()),
 		)
 	}
-
-	uc.enrichAssignee(ctx, fingerprint.Value(), username)
 
 	attachment := uc.msgBuilder.BuildAcknowledgedAttachment(a, uc.callbackURL, uc.keepUIURL, username)
 
@@ -256,6 +267,10 @@ func (uc *HandleCallbackUseCase) handleAcknowledgeAsync(ctx context.Context, a *
 }
 
 func (uc *HandleCallbackUseCase) handleResolveAsync(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username, postID, channelID string) {
+	// IMPORTANT: Set assignee BEFORE status to avoid race condition.
+	// Status change triggers Keep webhook, and assignee must be set by then.
+	uc.enrichAssignee(ctx, fingerprint.Value(), username)
+
 	// Status enrichment for manual resolve (DisposeOnNewAlert=true for consistency)
 	statusEnrichment := map[string]string{EnrichmentKeyStatus: "resolved"}
 	if err := uc.keepClient.EnrichAlert(ctx, fingerprint.Value(), statusEnrichment, port.EnrichOptions{DisposeOnNewAlert: true}); err != nil {
@@ -265,8 +280,6 @@ func (uc *HandleCallbackUseCase) handleResolveAsync(ctx context.Context, a *aler
 			slog.String("error", err.Error()),
 		)
 	}
-
-	uc.enrichAssignee(ctx, fingerprint.Value(), username)
 
 	attachment := uc.msgBuilder.BuildResolvedAttachment(a, uc.keepUIURL, username)
 

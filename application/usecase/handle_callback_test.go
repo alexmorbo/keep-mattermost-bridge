@@ -25,28 +25,29 @@ type enrichCall struct {
 }
 
 type mockKeepClient struct {
-	enrichAlertErr        error
-	enrichAlertCalled     bool
-	enrichedEnrichments   map[string]string
-	enrichedFingerprint   string
-	enrichCalls           []enrichCall
-	unenrichAlertErr      error
-	unenrichAlertCalled   bool
-	unenrichFingerprint   string
-	unenrichedEnrichments []string
-	getAlertErr           error
-	getAlertResponse      *port.KeepAlert
-	providers             []port.KeepProvider
-	workflows             []port.KeepWorkflow
-	getProvidersErr       error
-	createWebhookErr      error
-	getWorkflowsErr       error
-	createWorkflowErr     error
-	createWebhookCalled   bool
-	createWorkflowCalled  bool
-	createdWebhookConfig  port.WebhookProviderConfig
-	createdWorkflowConfig port.WorkflowConfig
-	mu                    sync.Mutex
+	enrichAlertErr            error
+	enrichAlertErrOnFirstCall bool // return error only on first EnrichAlert call
+	enrichAlertCalled         bool
+	enrichedEnrichments       map[string]string
+	enrichedFingerprint       string
+	enrichCalls               []enrichCall
+	unenrichAlertErr          error
+	unenrichAlertCalled       bool
+	unenrichFingerprint       string
+	unenrichedEnrichments     []string
+	getAlertErr               error
+	getAlertResponse          *port.KeepAlert
+	providers                 []port.KeepProvider
+	workflows                 []port.KeepWorkflow
+	getProvidersErr           error
+	createWebhookErr          error
+	getWorkflowsErr           error
+	createWorkflowErr         error
+	createWebhookCalled       bool
+	createWorkflowCalled      bool
+	createdWebhookConfig      port.WebhookProviderConfig
+	createdWorkflowConfig     port.WorkflowConfig
+	mu                        sync.Mutex
 }
 
 func newMockKeepClient() *mockKeepClient {
@@ -86,6 +87,10 @@ func (m *mockKeepClient) EnrichAlert(ctx context.Context, fingerprint string, en
 		DisposeOnNewAlert: opts.DisposeOnNewAlert,
 	})
 	if m.enrichAlertErr != nil {
+		// If enrichAlertErrOnFirstCall is set, only return error on first call
+		if m.enrichAlertErrOnFirstCall && len(m.enrichCalls) > 1 {
+			return nil
+		}
 		return m.enrichAlertErr
 	}
 	return nil
@@ -589,8 +594,8 @@ func TestHandleCallbackUseCase_ExecuteAsync_AcknowledgeWithoutUserMapping(t *tes
 
 	assert.True(t, keepClient.wasEnrichAlertCalled())
 	assert.Equal(t, "acknowledged", keepClient.enrichedEnrichments["status"])
-	_, hasAssignee := keepClient.enrichedEnrichments["assignee"]
-	assert.False(t, hasAssignee, "should not have assignee when no mapping exists")
+	// Without user mapping, assignee falls back to Mattermost username
+	assert.Equal(t, "testuser", keepClient.enrichedEnrichments["assignee"], "should use Mattermost username as fallback")
 }
 
 func TestHandleCallbackUseCase_Wait(t *testing.T) {
@@ -749,7 +754,7 @@ func TestHandleCallbackUseCase_ExecuteImmediate_MissingAttachmentJSON(t *testing
 }
 
 func TestHandleCallbackUseCase_ExecuteAsync_DisposeOnNewAlertOptions(t *testing.T) {
-	t.Run("acknowledge sets status with dispose=true and assignee with dispose=false", func(t *testing.T) {
+	t.Run("acknowledge sets assignee with dispose=false then status with dispose=true", func(t *testing.T) {
 		uc, _, keepClient, _, userMapper := setupHandleCallbackUseCase()
 		userMapper.mapping["testuser"] = "keep-user"
 
@@ -770,20 +775,20 @@ func TestHandleCallbackUseCase_ExecuteAsync_DisposeOnNewAlertOptions(t *testing.
 
 		require.Len(t, keepClient.enrichCalls, 2, "should make 2 enrich calls")
 
-		// First call: status with dispose=true
-		statusCall := keepClient.enrichCalls[0]
-		assert.Equal(t, "fp-12345", statusCall.Fingerprint)
-		assert.Equal(t, "acknowledged", statusCall.Enrichments["status"])
-		assert.True(t, statusCall.DisposeOnNewAlert, "status enrichment should have dispose=true")
-
-		// Second call: assignee with dispose=false
-		assigneeCall := keepClient.enrichCalls[1]
+		// First call: assignee with dispose=false (must be set before status to avoid race condition)
+		assigneeCall := keepClient.enrichCalls[0]
 		assert.Equal(t, "fp-12345", assigneeCall.Fingerprint)
 		assert.Equal(t, "keep-user", assigneeCall.Enrichments["assignee"])
 		assert.False(t, assigneeCall.DisposeOnNewAlert, "assignee enrichment should have dispose=false")
+
+		// Second call: status with dispose=true (triggers Keep webhook)
+		statusCall := keepClient.enrichCalls[1]
+		assert.Equal(t, "fp-12345", statusCall.Fingerprint)
+		assert.Equal(t, "acknowledged", statusCall.Enrichments["status"])
+		assert.True(t, statusCall.DisposeOnNewAlert, "status enrichment should have dispose=true")
 	})
 
-	t.Run("resolve sets status with dispose=true", func(t *testing.T) {
+	t.Run("resolve sets assignee then status with dispose=true", func(t *testing.T) {
 		uc, postRepo, keepClient, _, _ := setupHandleCallbackUseCase()
 
 		fp, _ := alert.NewFingerprint("fp-12345")
@@ -805,11 +810,88 @@ func TestHandleCallbackUseCase_ExecuteAsync_DisposeOnNewAlertOptions(t *testing.
 		uc.ExecuteAsync(input)
 		uc.Wait()
 
-		require.GreaterOrEqual(t, len(keepClient.enrichCalls), 1, "should make at least 1 enrich call")
+		require.Len(t, keepClient.enrichCalls, 2, "should make 2 enrich calls")
 
-		// First call: status with dispose=true
-		statusCall := keepClient.enrichCalls[0]
+		// First call: assignee with dispose=false
+		assigneeCall := keepClient.enrichCalls[0]
+		assert.Equal(t, "testuser", assigneeCall.Enrichments["assignee"], "should use Mattermost username as fallback")
+		assert.False(t, assigneeCall.DisposeOnNewAlert, "assignee enrichment should have dispose=false")
+
+		// Second call: status with dispose=true
+		statusCall := keepClient.enrichCalls[1]
 		assert.Equal(t, "resolved", statusCall.Enrichments["status"])
 		assert.True(t, statusCall.DisposeOnNewAlert, "status enrichment should have dispose=true")
+	})
+}
+
+func TestHandleCallbackUseCase_ExecuteAsync_AssigneeEnrichFailsButFlowContinues(t *testing.T) {
+	t.Run("acknowledge continues when assignee enrichment fails", func(t *testing.T) {
+		uc, _, keepClient, mmClient, _ := setupHandleCallbackUseCase()
+
+		// First enrich call (assignee) fails, second (status) succeeds
+		keepClient.enrichAlertErr = errors.New("assignee enrichment failed")
+		keepClient.enrichAlertErrOnFirstCall = true
+
+		input := dto.MattermostCallbackInput{
+			UserID:    "user-123",
+			PostID:    "post-456",
+			ChannelID: "channel-789",
+			Context: map[string]string{
+				"action":          "acknowledge",
+				"fingerprint":     "fp-12345",
+				"alert_name":      "Test Alert",
+				"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
+			},
+		}
+
+		uc.ExecuteAsync(input)
+		uc.Wait()
+
+		// Both enrich calls should be attempted
+		assert.Len(t, keepClient.enrichCalls, 2, "should attempt both enrich calls")
+
+		// Mattermost post should still be updated with username (local update doesn't depend on Keep)
+		assert.True(t, mmClient.wasUpdatePostCalled(), "should update Mattermost post even if assignee enrichment fails")
+
+		// Reply to thread should still be sent
+		assert.Len(t, mmClient.replyToThreadCalls, 1, "should reply to thread")
+		assert.Contains(t, mmClient.replyToThreadCalls[0], "testuser", "reply should contain username")
+	})
+
+	t.Run("resolve continues when assignee enrichment fails", func(t *testing.T) {
+		uc, postRepo, keepClient, mmClient, _ := setupHandleCallbackUseCase()
+
+		fp, _ := alert.NewFingerprint("fp-12345")
+		existingPost := post.NewPost("post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"), time.Now())
+		postRepo.posts[fp.Value()] = existingPost
+
+		// First enrich call (assignee) fails, second (status) succeeds
+		keepClient.enrichAlertErr = errors.New("assignee enrichment failed")
+		keepClient.enrichAlertErrOnFirstCall = true
+
+		input := dto.MattermostCallbackInput{
+			UserID:    "user-123",
+			PostID:    "post-456",
+			ChannelID: "channel-789",
+			Context: map[string]string{
+				"action":          "resolve",
+				"fingerprint":     "fp-12345",
+				"alert_name":      "Test Alert",
+				"attachment_json": `{"Color":"#808080","Title":"Test Alert","TitleLink":"","Text":"","Fields":null,"Actions":null,"Footer":"","FooterIcon":""}`,
+			},
+		}
+
+		uc.ExecuteAsync(input)
+		uc.Wait()
+
+		// Both enrich calls should be attempted
+		assert.Len(t, keepClient.enrichCalls, 2, "should attempt both enrich calls")
+
+		// Mattermost post should still be updated
+		assert.True(t, mmClient.wasUpdatePostCalled(), "should update Mattermost post even if assignee enrichment fails")
+
+		// Reply to thread should still be sent
+		assert.Len(t, mmClient.replyToThreadCalls, 1, "should reply to thread")
+		assert.Contains(t, mmClient.replyToThreadCalls[0], "testuser", "reply should contain username")
 	})
 }
