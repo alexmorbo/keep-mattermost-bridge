@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -199,7 +200,17 @@ func (c *FileConfig) EmojiForSeverity(severity string) string {
 }
 
 func (c *FileConfig) IsLabelExcluded(label string) bool {
-	return slices.Contains(c.Labels.Exclude, label)
+	for _, pattern := range c.Labels.Exclude {
+		if strings.HasSuffix(pattern, "*") {
+			prefix := strings.TrimSuffix(pattern, "*")
+			if strings.HasPrefix(label, prefix) {
+				return true
+			}
+		} else if pattern == label {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *FileConfig) IsLabelDisplayed(label string) bool {

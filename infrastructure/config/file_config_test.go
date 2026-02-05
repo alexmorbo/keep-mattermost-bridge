@@ -198,30 +198,156 @@ func TestEmojiForSeverity(t *testing.T) {
 }
 
 func TestIsLabelExcluded(t *testing.T) {
-	cfg := &FileConfig{
-		Labels: LabelsConfig{
-			Exclude: []string{"internal", "debug", "temp"},
-		},
-	}
+	t.Run("exact match", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: []string{"internal", "debug", "temp"},
+			},
+		}
 
-	tests := []struct {
-		label    string
-		excluded bool
-	}{
-		{"internal", true},
-		{"debug", true},
-		{"temp", true},
-		{"host", false},
-		{"service", false},
-		{"", false},
-	}
+		tests := []struct {
+			label    string
+			excluded bool
+		}{
+			{"internal", true},
+			{"debug", true},
+			{"temp", true},
+			{"host", false},
+			{"service", false},
+			{"", false},
+		}
 
-	for _, tt := range tests {
-		t.Run(tt.label, func(t *testing.T) {
-			result := cfg.IsLabelExcluded(tt.label)
-			assert.Equal(t, tt.excluded, result)
-		})
-	}
+		for _, tt := range tests {
+			t.Run(tt.label, func(t *testing.T) {
+				result := cfg.IsLabelExcluded(tt.label)
+				assert.Equal(t, tt.excluded, result)
+			})
+		}
+	})
+
+	t.Run("wildcard prefix", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: []string{"talos_*"},
+			},
+		}
+
+		tests := []struct {
+			label    string
+			excluded bool
+		}{
+			{"talos_version", true},
+			{"talos_", true},
+			{"talos", false},
+			{"other_label", false},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.label, func(t *testing.T) {
+				result := cfg.IsLabelExcluded(tt.label)
+				assert.Equal(t, tt.excluded, result)
+			})
+		}
+	})
+
+	t.Run("internal labels wildcard", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: []string{"__*"},
+			},
+		}
+
+		tests := []struct {
+			label    string
+			excluded bool
+		}{
+			{"__name__", true},
+			{"__address__", true},
+			{"__", true},
+			{"_single", false},
+			{"normal", false},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.label, func(t *testing.T) {
+				result := cfg.IsLabelExcluded(tt.label)
+				assert.Equal(t, tt.excluded, result)
+			})
+		}
+	})
+
+	t.Run("mixed patterns", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: []string{"prometheus", "__*", "job", "talos_*"},
+			},
+		}
+
+		tests := []struct {
+			label    string
+			excluded bool
+		}{
+			{"prometheus", true},
+			{"__name__", true},
+			{"job", true},
+			{"talos_version", true},
+			{"alertname", false},
+			{"instance", false},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.label, func(t *testing.T) {
+				result := cfg.IsLabelExcluded(tt.label)
+				assert.Equal(t, tt.excluded, result)
+			})
+		}
+	})
+
+	t.Run("empty exclude list", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: []string{},
+			},
+		}
+
+		assert.False(t, cfg.IsLabelExcluded("any_label"))
+		assert.False(t, cfg.IsLabelExcluded("__name__"))
+	})
+
+	t.Run("single asterisk wildcard matches everything", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: []string{"*"},
+			},
+		}
+
+		assert.True(t, cfg.IsLabelExcluded("any_label"))
+		assert.True(t, cfg.IsLabelExcluded("__name__"))
+		assert.True(t, cfg.IsLabelExcluded(""))
+	})
+
+	t.Run("asterisk in middle is treated as literal", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: []string{"foo*bar"},
+			},
+		}
+
+		assert.True(t, cfg.IsLabelExcluded("foo*bar"))
+		assert.False(t, cfg.IsLabelExcluded("foobar"))
+		assert.False(t, cfg.IsLabelExcluded("fooxbar"))
+	})
+
+	t.Run("nil exclude list", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: nil,
+			},
+		}
+
+		assert.False(t, cfg.IsLabelExcluded("any_label"))
+		assert.False(t, cfg.IsLabelExcluded("__name__"))
+	})
 }
 
 func TestIsLabelDisplayed(t *testing.T) {
