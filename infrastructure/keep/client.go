@@ -193,6 +193,7 @@ type alertResponse struct {
 	Description     string         `json:"description"`
 	Source          []string       `json:"source"`
 	Labels          map[string]any `json:"labels"`
+	Enrichments     map[string]any `json:"enrichments"`
 	FiringStartTime string         `json:"firingStartTime"`
 	LastReceived    string         `json:"lastReceived"`
 }
@@ -269,6 +270,15 @@ func (c *Client) GetAlert(ctx context.Context, fingerprint string) (*port.KeepAl
 		source = []string{}
 	}
 
+	enrichments := make(map[string]string)
+	for k, v := range alertResp.Enrichments {
+		if str, ok := v.(string); ok {
+			enrichments[k] = str
+		} else if v != nil {
+			enrichments[k] = fmt.Sprintf("%v", v)
+		}
+	}
+
 	return &port.KeepAlert{
 		Fingerprint:     alertResp.Fingerprint,
 		Name:            alertResp.Name,
@@ -278,6 +288,7 @@ func (c *Client) GetAlert(ctx context.Context, fingerprint string) (*port.KeepAl
 		Source:          source,
 		Labels:          labels,
 		FiringStartTime: firingStartTime,
+		Enrichments:     enrichments,
 	}, nil
 }
 

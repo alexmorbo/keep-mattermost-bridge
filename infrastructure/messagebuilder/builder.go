@@ -159,16 +159,24 @@ func (b *Builder) BuildAcknowledgedAttachment(a *alert.Alert, callbackURL, keepU
 		},
 	}
 
+	var footer, footerIcon string
+	if username != "" {
+		footer = fmt.Sprintf("Acknowledged by @%s", username)
+		footerIcon = b.msgConfig.FooterIconURL()
+	}
+
 	return post.Attachment{
-		Color:     color,
-		Title:     title,
-		TitleLink: titleLink,
-		Fields:    fields,
-		Actions:   buttons,
+		Color:      color,
+		Title:      title,
+		TitleLink:  titleLink,
+		Fields:     fields,
+		Actions:    buttons,
+		Footer:     footer,
+		FooterIcon: footerIcon,
 	}
 }
 
-func (b *Builder) BuildResolvedAttachment(a *alert.Alert, keepUIURL string) post.Attachment {
+func (b *Builder) BuildResolvedAttachment(a *alert.Alert, keepUIURL, acknowledgedBy string) post.Attachment {
 	severity := a.Severity().String()
 	color := b.msgConfig.ColorForSeverity("resolved")
 
@@ -186,11 +194,19 @@ func (b *Builder) BuildResolvedAttachment(a *alert.Alert, keepUIURL string) post
 		}, fields...)
 	}
 
+	var footer, footerIcon string
+	if acknowledgedBy != "" {
+		footer = fmt.Sprintf("Was acknowledged by @%s", acknowledgedBy)
+		footerIcon = b.msgConfig.FooterIconURL()
+	}
+
 	return post.Attachment{
-		Color:     color,
-		Title:     title,
-		TitleLink: titleLink,
-		Fields:    fields,
+		Color:      color,
+		Title:      title,
+		TitleLink:  titleLink,
+		Fields:     fields,
+		Footer:     footer,
+		FooterIcon: footerIcon,
 	}
 }
 

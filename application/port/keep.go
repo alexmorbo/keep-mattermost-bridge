@@ -14,6 +14,7 @@ type KeepAlert struct {
 	Source          []string
 	Labels          map[string]string
 	FiringStartTime time.Time
+	Enrichments     map[string]string
 }
 
 type KeepProvider struct {

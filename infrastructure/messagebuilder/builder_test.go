@@ -263,7 +263,7 @@ func TestBuildResolvedAttachment(t *testing.T) {
 		time.Time{},
 	)
 
-	attachment := builder.BuildResolvedAttachment(testAlert, "http://keep.ui")
+	attachment := builder.BuildResolvedAttachment(testAlert, "http://keep.ui", "")
 
 	assert.Equal(t, "#00CC00", attachment.Color, "should have green color")
 	assert.Contains(t, attachment.Title, "✅")
@@ -271,6 +271,92 @@ func TestBuildResolvedAttachment(t *testing.T) {
 	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?fingerprint=resolved-fingerprint-789")
 
 	assert.Len(t, attachment.Actions, 0, "should have no buttons")
+}
+
+func TestBuildResolvedAttachmentWithAcknowledgedBy(t *testing.T) {
+	fileConfig := &config.FileConfig{
+		Message: config.MessageConfig{
+			Colors: map[string]string{"resolved": "#00CC00"},
+			Emoji:  map[string]string{},
+			Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
+		},
+		Labels: config.LabelsConfig{
+			Display:  []string{},
+			Exclude:  []string{},
+			Rename:   map[string]string{},
+			Grouping: config.LabelGroupingConfig{},
+		},
+	}
+
+	builder := NewBuilder(fileConfig)
+
+	severity, err := alert.NewSeverity("high")
+	require.NoError(t, err)
+
+	fingerprint := alert.RestoreFingerprint("resolved-fingerprint-789")
+	status := alert.RestoreStatus(alert.StatusResolved)
+
+	testAlert := alert.RestoreAlert(
+		fingerprint,
+		"Resolved Alert",
+		severity,
+		status,
+		"This alert was resolved",
+		"prometheus",
+		map[string]string{"service": "api"},
+		time.Time{},
+	)
+
+	attachment := builder.BuildResolvedAttachment(testAlert, "http://keep.ui", "john.doe")
+
+	assert.Equal(t, "#00CC00", attachment.Color, "should have green color")
+	assert.Contains(t, attachment.Title, "✅")
+	assert.Contains(t, attachment.Title, "Resolved Alert")
+	assert.Equal(t, "Was acknowledged by @john.doe", attachment.Footer)
+	assert.Equal(t, "https://test.com/icon.png", attachment.FooterIcon)
+}
+
+func TestBuildAcknowledgedAttachmentWithFooter(t *testing.T) {
+	fileConfig := &config.FileConfig{
+		Message: config.MessageConfig{
+			Colors: map[string]string{"acknowledged": "#FFA500"},
+			Emoji:  map[string]string{},
+			Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
+		},
+		Labels: config.LabelsConfig{
+			Display:  []string{},
+			Exclude:  []string{},
+			Rename:   map[string]string{},
+			Grouping: config.LabelGroupingConfig{},
+		},
+	}
+
+	builder := NewBuilder(fileConfig)
+
+	severity, err := alert.NewSeverity("critical")
+	require.NoError(t, err)
+
+	fingerprint := alert.RestoreFingerprint("ack-fingerprint-456")
+	status := alert.RestoreStatus(alert.StatusAcknowledged)
+
+	testAlert := alert.RestoreAlert(
+		fingerprint,
+		"Test Alert",
+		severity,
+		status,
+		"Test description",
+		"prometheus",
+		map[string]string{"env": "production"},
+		time.Time{},
+	)
+
+	attachment := builder.BuildAcknowledgedAttachment(testAlert, "http://callback.url", "http://keep.ui", "john.doe")
+
+	assert.Equal(t, "#FFA500", attachment.Color, "should have orange color")
+	assert.Contains(t, attachment.Title, "👀")
+	assert.Contains(t, attachment.Title, "Test Alert")
+	assert.Equal(t, "Acknowledged by @john.doe", attachment.Footer)
+	assert.Equal(t, "https://test.com/icon.png", attachment.FooterIcon)
 }
 
 func TestBuildFieldsFiltering(t *testing.T) {

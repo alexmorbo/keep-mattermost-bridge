@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/alexmorbo/keep-mattermost-bridge/application/dto"
+	"github.com/alexmorbo/keep-mattermost-bridge/application/port"
 	"github.com/alexmorbo/keep-mattermost-bridge/domain/alert"
 	"github.com/alexmorbo/keep-mattermost-bridge/domain/post"
 )
@@ -61,13 +62,15 @@ func (m *mockPostRepository) Delete(ctx context.Context, fingerprint alert.Finge
 }
 
 type mockMattermostClient struct {
-	createPostErr    error
-	updatePostErr    error
-	createdPostID    string
-	updatedPostID    string
-	channelID        string
-	createPostCalled bool
-	updatePostCalled bool
+	createPostErr       error
+	updatePostErr       error
+	createdPostID       string
+	updatedPostID       string
+	channelID           string
+	createPostCalled    bool
+	updatePostCalled    bool
+	replyToThreadCalled bool
+	lastReplyMessage    string
 }
 
 func newMockMattermostClient() *mockMattermostClient {
@@ -99,11 +102,63 @@ func (m *mockMattermostClient) GetUser(ctx context.Context, userID string) (stri
 }
 
 func (m *mockMattermostClient) ReplyToThread(ctx context.Context, channelID, rootID, message string) error {
+	m.replyToThreadCalled = true
+	m.lastReplyMessage = message
+	return nil
+}
+
+type mockKeepClientForAlert struct {
+	alert       *port.KeepAlert
+	getAlertErr error
+}
+
+func newMockKeepClientForAlert() *mockKeepClientForAlert {
+	return &mockKeepClientForAlert{
+		alert: &port.KeepAlert{
+			Fingerprint: "fp-12345",
+			Name:        "Test Alert",
+			Status:      "firing",
+			Severity:    "high",
+			Enrichments: nil,
+		},
+	}
+}
+
+func (m *mockKeepClientForAlert) EnrichAlert(ctx context.Context, fingerprint string, enrichments map[string]string, opts port.EnrichOptions) error {
+	return nil
+}
+
+func (m *mockKeepClientForAlert) UnenrichAlert(ctx context.Context, fingerprint string, enrichments []string) error {
+	return nil
+}
+
+func (m *mockKeepClientForAlert) GetAlert(ctx context.Context, fingerprint string) (*port.KeepAlert, error) {
+	if m.getAlertErr != nil {
+		return nil, m.getAlertErr
+	}
+	return m.alert, nil
+}
+
+func (m *mockKeepClientForAlert) GetProviders(ctx context.Context) ([]port.KeepProvider, error) {
+	return nil, nil
+}
+
+func (m *mockKeepClientForAlert) CreateWebhookProvider(ctx context.Context, config port.WebhookProviderConfig) error {
+	return nil
+}
+
+func (m *mockKeepClientForAlert) GetWorkflows(ctx context.Context) ([]port.KeepWorkflow, error) {
+	return nil, nil
+}
+
+func (m *mockKeepClientForAlert) CreateWorkflow(ctx context.Context, config port.WorkflowConfig) error {
 	return nil
 }
 
 type mockMessageBuilder struct {
-	lastResolvedAlert *alert.Alert
+	lastResolvedAlert        *alert.Alert
+	lastResolvedAssignee     string
+	lastAcknowledgedAssignee string
 }
 
 func (m *mockMessageBuilder) BuildFiringAttachment(a *alert.Alert, callbackURL, keepUIURL string) post.Attachment {
@@ -114,14 +169,16 @@ func (m *mockMessageBuilder) BuildFiringAttachment(a *alert.Alert, callbackURL, 
 }
 
 func (m *mockMessageBuilder) BuildAcknowledgedAttachment(a *alert.Alert, callbackURL, keepUIURL, username string) post.Attachment {
+	m.lastAcknowledgedAssignee = username
 	return post.Attachment{
 		Color: "#FFA500",
 		Title: "ACKNOWLEDGED: " + a.Name(),
 	}
 }
 
-func (m *mockMessageBuilder) BuildResolvedAttachment(a *alert.Alert, keepUIURL string) post.Attachment {
+func (m *mockMessageBuilder) BuildResolvedAttachment(a *alert.Alert, keepUIURL, acknowledgedBy string) post.Attachment {
 	m.lastResolvedAlert = a
+	m.lastResolvedAssignee = acknowledgedBy
 	return post.Attachment{
 		Color: "#00CC00",
 		Title: "RESOLVED: " + a.Name(),
@@ -155,9 +212,10 @@ func (m *mockChannelResolver) ChannelIDForSeverity(severity string) string {
 	return m.channel
 }
 
-func setupHandleAlertUseCase() (*HandleAlertUseCase, *mockPostRepository, *mockMattermostClient, *mockMessageBuilder) {
+func setupHandleAlertUseCase() (*HandleAlertUseCase, *mockPostRepository, *mockMattermostClient, *mockKeepClientForAlert, *mockMessageBuilder) {
 	postRepo := newMockPostRepository()
 	mmClient := newMockMattermostClient()
+	keepClient := newMockKeepClientForAlert()
 	msgBuilder := &mockMessageBuilder{}
 	channelResolver := newMockChannelResolver()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -165,6 +223,7 @@ func setupHandleAlertUseCase() (*HandleAlertUseCase, *mockPostRepository, *mockM
 	uc := NewHandleAlertUseCase(
 		postRepo,
 		mmClient,
+		keepClient,
 		msgBuilder,
 		channelResolver,
 		"https://keep.example.com",
@@ -172,11 +231,11 @@ func setupHandleAlertUseCase() (*HandleAlertUseCase, *mockPostRepository, *mockM
 		logger,
 	)
 
-	return uc, postRepo, mmClient, msgBuilder
+	return uc, postRepo, mmClient, keepClient, msgBuilder
 }
 
 func TestHandleAlertUseCase_NewFiringAlert(t *testing.T) {
-	uc, postRepo, mmClient, _ := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -207,7 +266,7 @@ func TestHandleAlertUseCase_NewFiringAlert(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_RefireExistingAlert(t *testing.T) {
-	uc, postRepo, mmClient, _ := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	fp, _ := alert.NewFingerprint("fp-12345")
@@ -234,7 +293,7 @@ func TestHandleAlertUseCase_RefireExistingAlert(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_ResolveExistingAlert(t *testing.T) {
-	uc, postRepo, mmClient, _ := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	fp, _ := alert.NewFingerprint("fp-12345")
@@ -263,7 +322,7 @@ func TestHandleAlertUseCase_ResolveExistingAlert(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_ResolveWithoutExistingPost(t *testing.T) {
-	uc, postRepo, mmClient, _ := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -284,7 +343,7 @@ func TestHandleAlertUseCase_ResolveWithoutExistingPost(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_InvalidFingerprint(t *testing.T) {
-	uc, _, _, _ := setupHandleAlertUseCase()
+	uc, _, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -304,7 +363,7 @@ func TestHandleAlertUseCase_InvalidFingerprint(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_InvalidSeverity(t *testing.T) {
-	uc, _, _, _ := setupHandleAlertUseCase()
+	uc, _, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -324,7 +383,7 @@ func TestHandleAlertUseCase_InvalidSeverity(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_MattermostCreatePostError(t *testing.T) {
-	uc, _, mmClient, _ := setupHandleAlertUseCase()
+	uc, _, mmClient, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	mmClient.createPostErr = errors.New("mattermost error")
@@ -346,7 +405,7 @@ func TestHandleAlertUseCase_MattermostCreatePostError(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_LabelParsingWithPythonDict(t *testing.T) {
-	uc, postRepo, mmClient, _ := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -367,7 +426,7 @@ func TestHandleAlertUseCase_LabelParsingWithPythonDict(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_InvalidLabelsDoesNotFailAlert(t *testing.T) {
-	uc, postRepo, mmClient, _ := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -388,7 +447,7 @@ func TestHandleAlertUseCase_InvalidLabelsDoesNotFailAlert(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_RepositorySaveError(t *testing.T) {
-	uc, postRepo, _, _ := setupHandleAlertUseCase()
+	uc, postRepo, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	postRepo.saveErr = errors.New("database error")
@@ -410,7 +469,7 @@ func TestHandleAlertUseCase_RepositorySaveError(t *testing.T) {
 }
 
 func TestHandleAlertUseCase_RepositoryDeleteError(t *testing.T) {
-	uc, postRepo, _, _ := setupHandleAlertUseCase()
+	uc, postRepo, _, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	fp, _ := alert.NewFingerprint("fp-12345")
@@ -434,8 +493,41 @@ func TestHandleAlertUseCase_RepositoryDeleteError(t *testing.T) {
 	assert.Contains(t, err.Error(), "delete post from store")
 }
 
-func TestHandleAlertUseCase_AcknowledgedStatusIsIgnored(t *testing.T) {
-	uc, postRepo, mmClient, _ := setupHandleAlertUseCase()
+func TestHandleAlertUseCase_AcknowledgedStatusUpdatesPost(t *testing.T) {
+	uc, postRepo, mmClient, keepClient, _ := setupHandleAlertUseCase()
+	ctx := context.Background()
+
+	fp, _ := alert.NewFingerprint("fp-12345")
+	existingPost := post.NewPost("existing-post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"), time.Now())
+	postRepo.posts[fp.Value()] = existingPost
+
+	keepClient.alert = &port.KeepAlert{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Status:      "acknowledged",
+		Severity:    "high",
+		Enrichments: map[string]string{"assignee": "john.doe"},
+	}
+
+	input := dto.KeepAlertInput{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Severity:    "high",
+		Status:      "acknowledged",
+		Description: "Test description",
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
+	}
+
+	err := uc.Execute(ctx, input)
+
+	require.NoError(t, err)
+	assert.True(t, mmClient.updatePostCalled)
+	assert.Equal(t, "existing-post-123", mmClient.updatedPostID)
+}
+
+func TestHandleAlertUseCase_AcknowledgedWithoutExistingPostCreatesPost(t *testing.T) {
+	uc, postRepo, mmClient, _, _ := setupHandleAlertUseCase()
 	ctx := context.Background()
 
 	input := dto.KeepAlertInput{
@@ -451,23 +543,19 @@ func TestHandleAlertUseCase_AcknowledgedStatusIsIgnored(t *testing.T) {
 	err := uc.Execute(ctx, input)
 
 	require.NoError(t, err)
-	assert.False(t, mmClient.createPostCalled)
-	assert.False(t, mmClient.updatePostCalled)
-	assert.False(t, postRepo.saveCalled)
-	assert.False(t, postRepo.deleteCalled)
+	assert.True(t, mmClient.createPostCalled)
+	assert.True(t, postRepo.saveCalled)
 }
 
 func TestHandleAlertUseCase_ResolveUsesStoredFiringStartTime(t *testing.T) {
-	uc, postRepo, mmClient, msgBuilder := setupHandleAlertUseCase()
+	uc, postRepo, mmClient, _, msgBuilder := setupHandleAlertUseCase()
 	ctx := context.Background()
 
-	// Create post with specific firingStartTime
 	storedFiringTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
 	fp, _ := alert.NewFingerprint("fp-12345")
 	existingPost := post.NewPost("existing-post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"), storedFiringTime)
 	postRepo.posts[fp.Value()] = existingPost
 
-	// Resolve alert comes with empty firingStartTime (as Keep does)
 	input := dto.KeepAlertInput{
 		Fingerprint:     "fp-12345",
 		Name:            "Test Alert",
@@ -476,7 +564,7 @@ func TestHandleAlertUseCase_ResolveUsesStoredFiringStartTime(t *testing.T) {
 		Description:     "Test description",
 		Source:          []string{"prometheus"},
 		Labels:          map[string]string{},
-		FiringStartTime: "", // Empty - as Keep sends for resolved alerts
+		FiringStartTime: "",
 	}
 
 	err := uc.Execute(ctx, input)
@@ -484,8 +572,77 @@ func TestHandleAlertUseCase_ResolveUsesStoredFiringStartTime(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, mmClient.updatePostCalled)
 
-	// Verify that BuildResolvedAttachment received alert with stored firingStartTime
 	require.NotNil(t, msgBuilder.lastResolvedAlert, "BuildResolvedAttachment should have been called")
 	assert.Equal(t, storedFiringTime, msgBuilder.lastResolvedAlert.FiringStartTime(),
 		"resolved alert should use firingStartTime from stored post, not from incoming alert")
+}
+
+func TestHandleAlertUseCase_ResolveWithAssigneeShowsInFooter(t *testing.T) {
+	uc, postRepo, mmClient, keepClient, msgBuilder := setupHandleAlertUseCase()
+	ctx := context.Background()
+
+	fp, _ := alert.NewFingerprint("fp-12345")
+	existingPost := post.NewPost("existing-post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"), time.Now())
+	postRepo.posts[fp.Value()] = existingPost
+
+	keepClient.alert = &port.KeepAlert{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Status:      "resolved",
+		Severity:    "high",
+		Enrichments: map[string]string{"assignee": "john.doe"},
+	}
+
+	input := dto.KeepAlertInput{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Severity:    "high",
+		Status:      "resolved",
+		Description: "Test description",
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
+	}
+
+	err := uc.Execute(ctx, input)
+
+	require.NoError(t, err)
+	assert.True(t, mmClient.updatePostCalled)
+	assert.True(t, mmClient.replyToThreadCalled)
+	assert.Contains(t, mmClient.lastReplyMessage, "john.doe")
+	assert.Equal(t, "john.doe", msgBuilder.lastResolvedAssignee)
+}
+
+func TestHandleAlertUseCase_RefireAcknowledgedAlertStaysAcknowledged(t *testing.T) {
+	uc, postRepo, mmClient, keepClient, _ := setupHandleAlertUseCase()
+	ctx := context.Background()
+
+	fp, _ := alert.NewFingerprint("fp-12345")
+	existingPost := post.NewPost("existing-post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"), time.Now())
+	postRepo.posts[fp.Value()] = existingPost
+
+	keepClient.alert = &port.KeepAlert{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Status:      "acknowledged",
+		Severity:    "high",
+		Enrichments: map[string]string{"assignee": "john.doe", "status": "acknowledged"},
+	}
+
+	input := dto.KeepAlertInput{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Severity:    "high",
+		Status:      "firing",
+		Description: "Test description",
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
+	}
+
+	err := uc.Execute(ctx, input)
+
+	require.NoError(t, err)
+	assert.True(t, mmClient.updatePostCalled)
+	assert.True(t, mmClient.replyToThreadCalled)
+	assert.Contains(t, mmClient.lastReplyMessage, "re-fired")
+	assert.Contains(t, mmClient.lastReplyMessage, "john.doe")
 }

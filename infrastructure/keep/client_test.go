@@ -293,6 +293,67 @@ func TestGetAlertEmptySource(t *testing.T) {
 	assert.Equal(t, []string{}, alert.Source)
 }
 
+func TestGetAlertWithEnrichments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]any{
+			"fingerprint": "fp-123",
+			"name":        "TestAlert",
+			"status":      "acknowledged",
+			"severity":    "high",
+			"description": "Test description",
+			"source":      []string{"prometheus"},
+			"labels":      map[string]any{"env": "prod"},
+			"enrichments": map[string]any{
+				"assignee": "john.doe",
+				"status":   "acknowledged",
+				"int_val":  42,
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client := NewClient(server.URL, "test-key", logger)
+
+	alert, err := client.GetAlert(context.Background(), "fp-123")
+	require.NoError(t, err)
+	require.NotNil(t, alert)
+	require.NotNil(t, alert.Enrichments)
+
+	assert.Equal(t, "john.doe", alert.Enrichments["assignee"])
+	assert.Equal(t, "acknowledged", alert.Enrichments["status"])
+	assert.Equal(t, "42", alert.Enrichments["int_val"])
+}
+
+func TestGetAlertWithoutEnrichments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]any{
+			"fingerprint": "fp-123",
+			"name":        "TestAlert",
+			"status":      "firing",
+			"severity":    "high",
+			"description": "Test description",
+			"source":      []string{"prometheus"},
+			"labels":      map[string]any{"env": "prod"},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client := NewClient(server.URL, "test-key", logger)
+
+	alert, err := client.GetAlert(context.Background(), "fp-123")
+	require.NoError(t, err)
+	require.NotNil(t, alert)
+	assert.Empty(t, alert.Enrichments)
+}
+
 func TestGetAlertLabelsWithNonStringValues(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]any{

@@ -18,6 +18,7 @@ import (
 type HandleAlertUseCase struct {
 	postRepo        post.Repository
 	mmClient        port.MattermostClient
+	keepClient      port.KeepClient
 	msgBuilder      port.MessageBuilder
 	channelResolver port.ChannelResolver
 	keepUIURL       string
@@ -28,6 +29,7 @@ type HandleAlertUseCase struct {
 func NewHandleAlertUseCase(
 	postRepo post.Repository,
 	mmClient port.MattermostClient,
+	keepClient port.KeepClient,
 	msgBuilder port.MessageBuilder,
 	channelResolver port.ChannelResolver,
 	keepUIURL string,
@@ -37,6 +39,7 @@ func NewHandleAlertUseCase(
 	return &HandleAlertUseCase{
 		postRepo:        postRepo,
 		mmClient:        mmClient,
+		keepClient:      keepClient,
 		msgBuilder:      msgBuilder,
 		channelResolver: channelResolver,
 		keepUIURL:       keepUIURL,
@@ -98,6 +101,10 @@ func (uc *HandleAlertUseCase) Execute(ctx context.Context, input dto.KeepAlertIn
 		return uc.handleResolved(ctx, a, fingerprint)
 	}
 
+	if status.IsAcknowledged() {
+		return uc.handleAcknowledged(ctx, a, fingerprint)
+	}
+
 	return nil
 }
 
@@ -107,30 +114,99 @@ func (uc *HandleAlertUseCase) handleFiring(ctx context.Context, a *alert.Alert, 
 		return fmt.Errorf("find existing post: %w", err)
 	}
 
-	attachment := uc.msgBuilder.BuildFiringAttachment(a, uc.callbackURL, uc.keepUIURL)
-
 	channelID := uc.channelResolver.ChannelIDForSeverity(a.Severity().String())
 
-	if existingPost != nil {
+	if existingPost == nil {
+		return uc.createFiringPost(ctx, a, fingerprint, channelID)
+	}
+
+	keepAlert, err := uc.keepClient.GetAlert(ctx, fingerprint.Value())
+	if err != nil {
+		uc.logger.Warn("Failed to get alert from Keep, proceeding without enrichments",
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("error", err.Error()),
+		)
+	}
+
+	var assignee string
+	var wasAcknowledged bool
+	if keepAlert != nil && keepAlert.Enrichments != nil {
+		assignee = keepAlert.Enrichments["assignee"]
+		// Check both enrichment status and alert status from Keep
+		// Keep may report acknowledged in either field depending on the source
+		wasAcknowledged = keepAlert.Enrichments["status"] == "acknowledged" || keepAlert.Status == "acknowledged"
+	}
+
+	if wasAcknowledged || assignee != "" {
+		alertWithStoredTime := alert.RestoreAlert(
+			fingerprint, a.Name(), a.Severity(), a.Status(),
+			a.Description(), a.Source(), a.Labels(),
+			existingPost.FiringStartTime(),
+		)
+		attachment := uc.msgBuilder.BuildAcknowledgedAttachment(alertWithStoredTime, uc.callbackURL, uc.keepUIURL, assignee)
+
 		if err := uc.mmClient.UpdatePost(ctx, existingPost.PostID(), attachment); err != nil {
-			return fmt.Errorf("update existing post: %w", err)
+			return fmt.Errorf("update post to acknowledged: %w", err)
 		}
+
+		var msg string
+		if assignee != "" {
+			msg = fmt.Sprintf("⚠️ Alert re-fired. Still acknowledged by @%s", assignee)
+		} else {
+			msg = "⚠️ Alert re-fired while acknowledged"
+		}
+		if err := uc.mmClient.ReplyToThread(ctx, existingPost.ChannelID(), existingPost.PostID(), msg); err != nil {
+			uc.logger.Warn("Failed to reply to thread",
+				slog.String("post_id", existingPost.PostID()),
+				slog.String("error", err.Error()),
+			)
+		}
+
+		uc.logger.Info("Acknowledged alert re-fired",
+			logger.ApplicationFields("alert_refire_acknowledged",
+				slog.String("fingerprint", fingerprint.Value()),
+				slog.String("assignee", assignee),
+			),
+		)
 
 		existingPost.Touch()
 		if err := uc.postRepo.Save(ctx, fingerprint, existingPost); err != nil {
 			return fmt.Errorf("update post in store: %w", err)
 		}
 
-		uc.logger.Info("Alert updated (re-fire)",
-			logger.ApplicationFields("alert_updated",
-				slog.String("fingerprint", fingerprint.Value()),
-				slog.String("post_id", existingPost.PostID()),
-				slog.String("action", "re-fire"),
-			),
-		)
 		alertReFireCounter.Inc()
 		return nil
 	}
+
+	alertWithStoredTime := alert.RestoreAlert(
+		fingerprint, a.Name(), a.Severity(), a.Status(),
+		a.Description(), a.Source(), a.Labels(),
+		existingPost.FiringStartTime(),
+	)
+	attachment := uc.msgBuilder.BuildFiringAttachment(alertWithStoredTime, uc.callbackURL, uc.keepUIURL)
+
+	if err := uc.mmClient.UpdatePost(ctx, existingPost.PostID(), attachment); err != nil {
+		return fmt.Errorf("update existing post: %w", err)
+	}
+
+	existingPost.Touch()
+	if err := uc.postRepo.Save(ctx, fingerprint, existingPost); err != nil {
+		return fmt.Errorf("update post in store: %w", err)
+	}
+
+	uc.logger.Info("Alert updated (re-fire)",
+		logger.ApplicationFields("alert_updated",
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("post_id", existingPost.PostID()),
+			slog.String("action", "re-fire"),
+		),
+	)
+	alertReFireCounter.Inc()
+	return nil
+}
+
+func (uc *HandleAlertUseCase) createFiringPost(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, channelID string) error {
+	attachment := uc.msgBuilder.BuildFiringAttachment(a, uc.callbackURL, uc.keepUIURL)
 
 	postID, err := uc.mmClient.CreatePost(ctx, channelID, attachment)
 	if err != nil {
@@ -170,6 +246,19 @@ func (uc *HandleAlertUseCase) handleResolved(ctx context.Context, a *alert.Alert
 		return fmt.Errorf("find existing post: %w", err)
 	}
 
+	keepAlert, err := uc.keepClient.GetAlert(ctx, fingerprint.Value())
+	if err != nil {
+		uc.logger.Warn("Failed to get alert from Keep, proceeding without enrichments",
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("error", err.Error()),
+		)
+	}
+
+	var assignee string
+	if keepAlert != nil && keepAlert.Enrichments != nil {
+		assignee = keepAlert.Enrichments["assignee"]
+	}
+
 	resolvedAlert := alert.RestoreAlert(
 		fingerprint,
 		a.Name(),
@@ -181,10 +270,20 @@ func (uc *HandleAlertUseCase) handleResolved(ctx context.Context, a *alert.Alert
 		existingPost.FiringStartTime(),
 	)
 
-	attachment := uc.msgBuilder.BuildResolvedAttachment(resolvedAlert, uc.keepUIURL)
+	attachment := uc.msgBuilder.BuildResolvedAttachment(resolvedAlert, uc.keepUIURL, assignee)
 
 	if err := uc.mmClient.UpdatePost(ctx, existingPost.PostID(), attachment); err != nil {
 		return fmt.Errorf("update post to resolved: %w", err)
+	}
+
+	if assignee != "" {
+		msg := fmt.Sprintf("✅ Alert automatically resolved. Was acknowledged by @%s", assignee)
+		if err := uc.mmClient.ReplyToThread(ctx, existingPost.ChannelID(), existingPost.PostID(), msg); err != nil {
+			uc.logger.Warn("Failed to reply to thread",
+				slog.String("post_id", existingPost.PostID()),
+				slog.String("error", err.Error()),
+			)
+		}
 	}
 
 	if err := uc.postRepo.Delete(ctx, fingerprint); err != nil {
@@ -195,9 +294,97 @@ func (uc *HandleAlertUseCase) handleResolved(ctx context.Context, a *alert.Alert
 		logger.ApplicationFields("alert_resolved",
 			slog.String("fingerprint", fingerprint.Value()),
 			slog.String("post_id", existingPost.PostID()),
+			slog.String("assignee", assignee),
 		),
 	)
 	alertResolveCounter.Inc()
+
+	return nil
+}
+
+func (uc *HandleAlertUseCase) handleAcknowledged(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint) error {
+	existingPost, err := uc.postRepo.FindByFingerprint(ctx, fingerprint)
+	if err != nil {
+		if errors.Is(err, post.ErrNotFound) {
+			return uc.createAcknowledgedPost(ctx, a, fingerprint)
+		}
+		return fmt.Errorf("find existing post: %w", err)
+	}
+
+	keepAlert, err := uc.keepClient.GetAlert(ctx, fingerprint.Value())
+	if err != nil {
+		uc.logger.Warn("Failed to get alert from Keep",
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("error", err.Error()),
+		)
+	}
+
+	var assignee string
+	if keepAlert != nil && keepAlert.Enrichments != nil {
+		assignee = keepAlert.Enrichments["assignee"]
+	}
+
+	alertWithStoredTime := alert.RestoreAlert(
+		fingerprint, a.Name(), a.Severity(), a.Status(),
+		a.Description(), a.Source(), a.Labels(),
+		existingPost.FiringStartTime(),
+	)
+	attachment := uc.msgBuilder.BuildAcknowledgedAttachment(alertWithStoredTime, uc.callbackURL, uc.keepUIURL, assignee)
+
+	if err := uc.mmClient.UpdatePost(ctx, existingPost.PostID(), attachment); err != nil {
+		return fmt.Errorf("update post to acknowledged: %w", err)
+	}
+
+	uc.logger.Info("Alert acknowledged (from Keep)",
+		logger.ApplicationFields("alert_acknowledged",
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("post_id", existingPost.PostID()),
+			slog.String("assignee", assignee),
+		),
+	)
+	alertAckCounter.Inc()
+
+	return nil
+}
+
+func (uc *HandleAlertUseCase) createAcknowledgedPost(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint) error {
+	keepAlert, err := uc.keepClient.GetAlert(ctx, fingerprint.Value())
+	if err != nil {
+		uc.logger.Warn("Failed to get alert from Keep, proceeding without enrichments",
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("error", err.Error()),
+		)
+	}
+
+	var assignee string
+	if keepAlert != nil && keepAlert.Enrichments != nil {
+		assignee = keepAlert.Enrichments["assignee"]
+	}
+
+	attachment := uc.msgBuilder.BuildAcknowledgedAttachment(a, uc.callbackURL, uc.keepUIURL, assignee)
+
+	channelID := uc.channelResolver.ChannelIDForSeverity(a.Severity().String())
+
+	postID, err := uc.mmClient.CreatePost(ctx, channelID, attachment)
+	if err != nil {
+		return fmt.Errorf("create mattermost post: %w", err)
+	}
+
+	newPost := post.NewPost(postID, channelID, fingerprint, a.Name(), a.Severity(), a.FiringStartTime())
+	if err := uc.postRepo.Save(ctx, fingerprint, newPost); err != nil {
+		return fmt.Errorf("save post to store: %w", err)
+	}
+
+	uc.logger.Info("Acknowledged alert posted to Mattermost",
+		logger.ApplicationFields("alert_posted_acknowledged",
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("severity", a.Severity().String()),
+			slog.String("channel_id", channelID),
+			slog.String("post_id", postID),
+			slog.String("assignee", assignee),
+		),
+	)
+	alertsPostedCounter(a.Severity().String(), channelID).Inc()
 
 	return nil
 }

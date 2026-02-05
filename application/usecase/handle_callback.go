@@ -268,7 +268,7 @@ func (uc *HandleCallbackUseCase) handleResolveAsync(ctx context.Context, a *aler
 
 	uc.enrichAssignee(ctx, fingerprint.Value(), username)
 
-	attachment := uc.msgBuilder.BuildResolvedAttachment(a, uc.keepUIURL)
+	attachment := uc.msgBuilder.BuildResolvedAttachment(a, uc.keepUIURL, username)
 
 	if err := uc.mmClient.UpdatePost(ctx, postID, attachment); err != nil {
 		uc.logger.Error("Failed to update post",

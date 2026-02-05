@@ -253,7 +253,7 @@ func (m *mockMessageBuilderCallback) BuildAcknowledgedAttachment(a *alert.Alert,
 	}
 }
 
-func (m *mockMessageBuilderCallback) BuildResolvedAttachment(a *alert.Alert, keepUIURL string) post.Attachment {
+func (m *mockMessageBuilderCallback) BuildResolvedAttachment(a *alert.Alert, keepUIURL, acknowledgedBy string) post.Attachment {
 	return post.Attachment{
 		Color: "#00CC00",
 		Title: "RESOLVED: " + a.Name(),

@@ -87,6 +87,7 @@ func main() {
 	handleAlertUC := usecase.NewHandleAlertUseCase(
 		postRepo,
 		mmClient,
+		keepClient,
 		msgBuilder,
 		fileCfg,
 		cfg.Keep.UIURL,
