@@ -315,7 +315,7 @@ func (b *Builder) buildFields(labels map[string]string, severity string) []post.
 				result = append(result, post.AttachmentField{
 					Title: group.GroupName,
 					Value: strings.Join(bucket, "\n"),
-					Short: false,
+					Short: true,
 				})
 			} else {
 				ungroupedLabels = append(ungroupedLabels, bucket...)
@@ -326,7 +326,7 @@ func (b *Builder) buildFields(labels map[string]string, severity string) []post.
 			result = append(result, post.AttachmentField{
 				Title: "Labels",
 				Value: strings.Join(ungroupedLabels, "\n"),
-				Short: false,
+				Short: true,
 			})
 		}
 	}
