@@ -326,7 +326,7 @@ func TestIsLabelExcluded(t *testing.T) {
 		assert.True(t, cfg.IsLabelExcluded(""))
 	})
 
-	t.Run("asterisk in middle is treated as literal", func(t *testing.T) {
+	t.Run("asterisk in middle matches glob", func(t *testing.T) {
 		cfg := &FileConfig{
 			Labels: LabelsConfig{
 				Exclude: []string{"foo*bar"},
@@ -334,8 +334,86 @@ func TestIsLabelExcluded(t *testing.T) {
 		}
 
 		assert.True(t, cfg.IsLabelExcluded("foo*bar"))
-		assert.False(t, cfg.IsLabelExcluded("foobar"))
-		assert.False(t, cfg.IsLabelExcluded("fooxbar"))
+		assert.True(t, cfg.IsLabelExcluded("foobar"))
+		assert.True(t, cfg.IsLabelExcluded("fooxbar"))
+		assert.True(t, cfg.IsLabelExcluded("foo123bar"))
+		assert.False(t, cfg.IsLabelExcluded("foobarbaz"))
+	})
+
+	t.Run("wildcard suffix pattern", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: []string{"*_kubernetes_io_zone"},
+			},
+		}
+
+		assert.True(t, cfg.IsLabelExcluded("topology_kubernetes_io_zone"))
+		assert.True(t, cfg.IsLabelExcluded("failure_domain_beta_kubernetes_io_zone"))
+		assert.True(t, cfg.IsLabelExcluded("_kubernetes_io_zone"))
+		assert.False(t, cfg.IsLabelExcluded("kubernetes_io_zone_extra"))
+	})
+
+	t.Run("wildcard both sides", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: []string{"*kubernetes*"},
+			},
+		}
+
+		assert.True(t, cfg.IsLabelExcluded("kubernetes"))
+		assert.True(t, cfg.IsLabelExcluded("beta_kubernetes_io"))
+		assert.True(t, cfg.IsLabelExcluded("my_kubernetes_label"))
+		assert.False(t, cfg.IsLabelExcluded("k8s_label"))
+	})
+
+	t.Run("question mark matches single character", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: []string{"label?"},
+			},
+		}
+
+		assert.True(t, cfg.IsLabelExcluded("label1"))
+		assert.True(t, cfg.IsLabelExcluded("labelx"))
+		assert.False(t, cfg.IsLabelExcluded("label"))
+		assert.False(t, cfg.IsLabelExcluded("label12"))
+	})
+
+	t.Run("character class pattern", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: []string{"node[0-9]"},
+			},
+		}
+
+		assert.True(t, cfg.IsLabelExcluded("node0"))
+		assert.True(t, cfg.IsLabelExcluded("node5"))
+		assert.True(t, cfg.IsLabelExcluded("node9"))
+		assert.False(t, cfg.IsLabelExcluded("nodex"))
+		assert.False(t, cfg.IsLabelExcluded("node10"))
+	})
+
+	t.Run("negated character class", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: []string{"[^_]*"},
+			},
+		}
+
+		assert.True(t, cfg.IsLabelExcluded("normal_label"))
+		assert.True(t, cfg.IsLabelExcluded("alertname"))
+		assert.False(t, cfg.IsLabelExcluded("_internal"))
+	})
+
+	t.Run("escaped special characters", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: []string{"literal\\*star"},
+			},
+		}
+
+		assert.True(t, cfg.IsLabelExcluded("literal*star"))
+		assert.False(t, cfg.IsLabelExcluded("literalxstar"))
 	})
 
 	t.Run("nil exclude list", func(t *testing.T) {
@@ -1158,6 +1236,87 @@ func TestDefaultRenameLabels(t *testing.T) {
 	assert.NotNil(t, cfg.Labels.Rename)
 	assert.Equal(t, "Alert Group", cfg.Labels.Rename["alertgroup"])
 	assert.Len(t, cfg.Labels.Rename, 1)
+}
+
+func TestValidate(t *testing.T) {
+	t.Run("valid patterns pass validation", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: []string{
+					"exact_match",
+					"prefix*",
+					"*suffix",
+					"*middle*",
+					"node[0-9]",
+					"label?",
+				},
+			},
+		}
+
+		err := cfg.Validate()
+		assert.NoError(t, err)
+	})
+
+	t.Run("empty patterns pass validation", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: []string{},
+			},
+		}
+
+		err := cfg.Validate()
+		assert.NoError(t, err)
+	})
+
+	t.Run("nil patterns pass validation", func(t *testing.T) {
+		cfg := &FileConfig{}
+
+		err := cfg.Validate()
+		assert.NoError(t, err)
+	})
+
+	t.Run("unclosed bracket fails validation", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: []string{"[unclosed"},
+			},
+		}
+
+		err := cfg.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid label exclude pattern")
+		assert.Contains(t, err.Error(), "[unclosed")
+	})
+
+	t.Run("first invalid pattern is reported", func(t *testing.T) {
+		cfg := &FileConfig{
+			Labels: LabelsConfig{
+				Exclude: []string{"valid*", "[invalid", "also[invalid"},
+			},
+		}
+
+		err := cfg.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "[invalid")
+	})
+}
+
+func TestLoadFromFileWithInvalidPattern(t *testing.T) {
+	yamlContent := `
+labels:
+  exclude:
+    - "[unclosed_bracket"
+`
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "invalid_pattern.yaml")
+	err := os.WriteFile(configPath, []byte(yamlContent), 0600)
+	require.NoError(t, err)
+
+	cfg, err := LoadFromFile(configPath)
+	assert.Error(t, err)
+	assert.Nil(t, cfg)
+	assert.Contains(t, err.Error(), "invalid label exclude pattern")
 }
 
 func boolPtr(b bool) *bool {

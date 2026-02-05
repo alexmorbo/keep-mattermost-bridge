@@ -1,10 +1,11 @@
 package config
 
 import (
+	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -86,6 +87,11 @@ func LoadFromFile(path string) (*FileConfig, error) {
 	}
 
 	cfg.applyDefaults()
+
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
 	return &cfg, nil
 }
 
@@ -93,6 +99,15 @@ func defaultFileConfig() *FileConfig {
 	cfg := &FileConfig{}
 	cfg.applyDefaults()
 	return cfg
+}
+
+func (c *FileConfig) Validate() error {
+	for _, pattern := range c.Labels.Exclude {
+		if _, err := path.Match(pattern, ""); err != nil {
+			return fmt.Errorf("invalid label exclude pattern %q: %w", pattern, err)
+		}
+	}
+	return nil
 }
 
 func (c *FileConfig) applyDefaults() {
@@ -201,12 +216,14 @@ func (c *FileConfig) EmojiForSeverity(severity string) string {
 
 func (c *FileConfig) IsLabelExcluded(label string) bool {
 	for _, pattern := range c.Labels.Exclude {
-		if strings.HasSuffix(pattern, "*") {
-			prefix := strings.TrimSuffix(pattern, "*")
-			if strings.HasPrefix(label, prefix) {
+		matched, err := path.Match(pattern, label)
+		if err != nil {
+			if pattern == label {
 				return true
 			}
-		} else if pattern == label {
+			continue
+		}
+		if matched {
 			return true
 		}
 	}
