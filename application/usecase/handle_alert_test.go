@@ -109,7 +109,9 @@ func (m *mockMattermostClient) ReplyToThread(ctx context.Context, channelID, roo
 
 type mockKeepClientForAlert struct {
 	alert       *port.KeepAlert
+	alerts      []*port.KeepAlert // different responses per call (for retry testing)
 	getAlertErr error
+	callCount   int
 }
 
 func newMockKeepClientForAlert() *mockKeepClientForAlert {
@@ -133,8 +135,17 @@ func (m *mockKeepClientForAlert) UnenrichAlert(ctx context.Context, fingerprint 
 }
 
 func (m *mockKeepClientForAlert) GetAlert(ctx context.Context, fingerprint string) (*port.KeepAlert, error) {
+	m.callCount++
 	if m.getAlertErr != nil {
 		return nil, m.getAlertErr
+	}
+	// If alerts slice is set, return based on call count (for retry testing)
+	if len(m.alerts) > 0 {
+		idx := m.callCount - 1
+		if idx >= len(m.alerts) {
+			idx = len(m.alerts) - 1
+		}
+		return m.alerts[idx], nil
 	}
 	return m.alert, nil
 }
@@ -711,4 +722,147 @@ func TestHandleAlertUseCase_RefireAcknowledgedAlertStaysAcknowledged(t *testing.
 	assert.True(t, mmClient.replyToThreadCalled)
 	assert.Contains(t, mmClient.lastReplyMessage, "re-fired")
 	assert.Contains(t, mmClient.lastReplyMessage, "john.doe")
+}
+
+// Tests for fetchAssigneeWithRetry
+
+func TestFetchAssigneeWithRetry_SucceedsOnFirstAttempt(t *testing.T) {
+	uc, _, _, keepClient, msgBuilder, userMapper := setupHandleAlertUseCase()
+	userMapper.mapping["john.doe"] = "john.doe@keep"
+	ctx := context.Background()
+
+	keepClient.alert = &port.KeepAlert{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Status:      "acknowledged",
+		Severity:    "high",
+		Enrichments: map[string]string{"assignee": "john.doe@keep"},
+	}
+
+	assignee := uc.fetchAssigneeWithRetry(ctx, "fp-12345")
+
+	assert.Equal(t, "john.doe", assignee)
+	assert.Equal(t, 1, keepClient.callCount, "should only make 1 API call when assignee found immediately")
+	_ = msgBuilder // silence unused
+}
+
+func TestFetchAssigneeWithRetry_SucceedsOnSecondAttempt(t *testing.T) {
+	uc, _, _, keepClient, _, userMapper := setupHandleAlertUseCase()
+	userMapper.mapping["john.doe"] = "john.doe@keep"
+	ctx := context.Background()
+
+	// First call: no assignee, second call: assignee present
+	keepClient.alerts = []*port.KeepAlert{
+		{
+			Fingerprint: "fp-12345",
+			Name:        "Test Alert",
+			Status:      "acknowledged",
+			Severity:    "high",
+			Enrichments: nil, // no assignee on first call
+		},
+		{
+			Fingerprint: "fp-12345",
+			Name:        "Test Alert",
+			Status:      "acknowledged",
+			Severity:    "high",
+			Enrichments: map[string]string{"assignee": "john.doe@keep"},
+		},
+	}
+
+	assignee := uc.fetchAssigneeWithRetry(ctx, "fp-12345")
+
+	assert.Equal(t, "john.doe", assignee)
+	assert.Equal(t, 2, keepClient.callCount, "should make 2 API calls")
+}
+
+func TestFetchAssigneeWithRetry_SucceedsOnThirdAttempt(t *testing.T) {
+	uc, _, _, keepClient, _, userMapper := setupHandleAlertUseCase()
+	userMapper.mapping["john.doe"] = "john.doe@keep"
+	ctx := context.Background()
+
+	// First two calls: no assignee, third call: assignee present
+	keepClient.alerts = []*port.KeepAlert{
+		{Fingerprint: "fp-12345", Name: "Test Alert", Status: "acknowledged", Severity: "high", Enrichments: nil},
+		{Fingerprint: "fp-12345", Name: "Test Alert", Status: "acknowledged", Severity: "high", Enrichments: nil},
+		{Fingerprint: "fp-12345", Name: "Test Alert", Status: "acknowledged", Severity: "high", Enrichments: map[string]string{"assignee": "john.doe@keep"}},
+	}
+
+	assignee := uc.fetchAssigneeWithRetry(ctx, "fp-12345")
+
+	assert.Equal(t, "john.doe", assignee)
+	assert.Equal(t, 3, keepClient.callCount, "should make 3 API calls")
+}
+
+func TestFetchAssigneeWithRetry_ExhaustsRetriesReturnsEmpty(t *testing.T) {
+	uc, _, _, keepClient, _, _ := setupHandleAlertUseCase()
+	ctx := context.Background()
+
+	// All calls return no assignee
+	keepClient.alert = &port.KeepAlert{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Status:      "acknowledged",
+		Severity:    "high",
+		Enrichments: nil, // no assignee
+	}
+
+	assignee := uc.fetchAssigneeWithRetry(ctx, "fp-12345")
+
+	assert.Equal(t, "", assignee, "should return empty when assignee not found after all retries")
+	assert.Equal(t, 4, keepClient.callCount, "should make 4 API calls (1 initial + 3 retries)")
+}
+
+func TestFetchAssigneeWithRetry_APIErrorAbortsRetry(t *testing.T) {
+	uc, _, _, keepClient, _, _ := setupHandleAlertUseCase()
+	ctx := context.Background()
+
+	keepClient.getAlertErr = errors.New("API error")
+
+	assignee := uc.fetchAssigneeWithRetry(ctx, "fp-12345")
+
+	assert.Equal(t, "", assignee, "should return empty on API error")
+	assert.Equal(t, 1, keepClient.callCount, "should only make 1 API call when error occurs")
+}
+
+func TestFetchAssigneeWithRetry_RespectsContextCancellation(t *testing.T) {
+	uc, _, _, keepClient, _, _ := setupHandleAlertUseCase()
+
+	// All calls return no assignee - will trigger retries
+	keepClient.alert = &port.KeepAlert{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Status:      "acknowledged",
+		Severity:    "high",
+		Enrichments: nil,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel immediately - should abort during first retry wait
+	cancel()
+
+	start := time.Now()
+	assignee := uc.fetchAssigneeWithRetry(ctx, "fp-12345")
+	elapsed := time.Since(start)
+
+	assert.Equal(t, "", assignee, "should return empty when context cancelled")
+	// Should return quickly without waiting for all retries (total would be ~700ms)
+	assert.Less(t, elapsed, 200*time.Millisecond, "should abort quickly when context is cancelled")
+}
+
+func TestFetchAssigneeWithRetry_FallsBackToKeepUsername(t *testing.T) {
+	uc, _, _, keepClient, _, _ := setupHandleAlertUseCase()
+	// No user mapping configured - should return Keep username as-is
+	ctx := context.Background()
+
+	keepClient.alert = &port.KeepAlert{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Status:      "acknowledged",
+		Severity:    "high",
+		Enrichments: map[string]string{"assignee": "unmapped@keep.local"},
+	}
+
+	assignee := uc.fetchAssigneeWithRetry(ctx, "fp-12345")
+
+	assert.Equal(t, "unmapped@keep.local", assignee, "should return Keep username when no mapping exists")
 }

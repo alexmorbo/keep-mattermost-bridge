@@ -317,18 +317,9 @@ func (uc *HandleAlertUseCase) handleAcknowledged(ctx context.Context, a *alert.A
 		return fmt.Errorf("find existing post: %w", err)
 	}
 
-	keepAlert, err := uc.keepClient.GetAlert(ctx, fingerprint.Value())
-	if err != nil {
-		uc.logger.Warn("Failed to get alert from Keep",
-			slog.String("fingerprint", fingerprint.Value()),
-			slog.String("error", err.Error()),
-		)
-	}
-
-	var assignee string
-	if keepAlert != nil {
-		assignee = uc.resolveAssigneeUsername(keepAlert.Enrichments)
-	}
+	// Fetch assignee from Keep with retry - enrichments may not be available immediately
+	// due to race condition between callback setting enrichments and webhook arriving
+	assignee := uc.fetchAssigneeWithRetry(ctx, fingerprint.Value())
 
 	alertWithStoredTime := alert.RestoreAlert(
 		fingerprint, a.Name(), a.Severity(), a.Status(),
@@ -354,18 +345,8 @@ func (uc *HandleAlertUseCase) handleAcknowledged(ctx context.Context, a *alert.A
 }
 
 func (uc *HandleAlertUseCase) createAcknowledgedPost(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint) error {
-	keepAlert, err := uc.keepClient.GetAlert(ctx, fingerprint.Value())
-	if err != nil {
-		uc.logger.Warn("Failed to get alert from Keep, proceeding without enrichments",
-			slog.String("fingerprint", fingerprint.Value()),
-			slog.String("error", err.Error()),
-		)
-	}
-
-	var assignee string
-	if keepAlert != nil {
-		assignee = uc.resolveAssigneeUsername(keepAlert.Enrichments)
-	}
+	// Fetch assignee from Keep with retry - enrichments may not be available immediately
+	assignee := uc.fetchAssigneeWithRetry(ctx, fingerprint.Value())
 
 	attachment := uc.msgBuilder.BuildAcknowledgedAttachment(a, uc.callbackURL, uc.keepUIURL, assignee)
 
@@ -409,4 +390,62 @@ func (uc *HandleAlertUseCase) resolveAssigneeUsername(enrichments map[string]str
 		return mmUser
 	}
 	return keepUser
+}
+
+// fetchAssigneeWithRetry fetches assignee from Keep API with exponential backoff retry.
+// This handles the race condition where webhook arrives before enrichments are set.
+func (uc *HandleAlertUseCase) fetchAssigneeWithRetry(ctx context.Context, fingerprint string) string {
+	// Exponential backoff: 100ms, 200ms, 400ms (total max ~700ms)
+	retryDelays := []time.Duration{100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond}
+
+	for attempt := 0; attempt <= len(retryDelays); attempt++ {
+		assigneeRetryAttempts(attempt + 1).Inc()
+
+		keepAlert, err := uc.keepClient.GetAlert(ctx, fingerprint)
+		if err != nil {
+			uc.logger.Warn("Failed to get alert from Keep",
+				slog.String("fingerprint", fingerprint),
+				slog.String("error", err.Error()),
+				slog.Int("attempt", attempt+1),
+			)
+			assigneeRetryError.Inc()
+			return ""
+		}
+
+		assignee := uc.resolveAssigneeUsername(keepAlert.Enrichments)
+		if assignee != "" {
+			if attempt > 0 {
+				uc.logger.Debug("Assignee found after retry",
+					slog.String("fingerprint", fingerprint),
+					slog.Int("attempt", attempt+1),
+					slog.String("assignee", assignee),
+				)
+			}
+			assigneeRetrySuccess.Inc()
+			return assignee
+		}
+
+		// Assignee not set yet, wait and retry (unless last attempt)
+		if attempt < len(retryDelays) {
+			uc.logger.Debug("Assignee not found, retrying with backoff",
+				slog.String("fingerprint", fingerprint),
+				slog.Int("attempt", attempt+1),
+				slog.Duration("delay", retryDelays[attempt]),
+			)
+			select {
+			case <-ctx.Done():
+				assigneeRetryError.Inc()
+				return ""
+			case <-time.After(retryDelays[attempt]):
+				// continue to next attempt
+			}
+		}
+	}
+
+	uc.logger.Debug("Assignee not found after retries",
+		slog.String("fingerprint", fingerprint),
+		slog.Int("total_attempts", len(retryDelays)+1),
+	)
+	assigneeRetryExhausted.Inc()
+	return ""
 }
