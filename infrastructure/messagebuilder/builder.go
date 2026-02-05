@@ -12,6 +12,18 @@ import (
 	"github.com/alexmorbo/keep-mattermost-bridge/domain/post"
 )
 
+const (
+	ActionAcknowledge   = "acknowledge"
+	ActionResolve       = "resolve"
+	ActionUnacknowledge = "unacknowledge"
+)
+
+const (
+	ButtonStyleDefault = "default"
+	ButtonStyleSuccess = "success"
+	ButtonStyleDanger  = "danger"
+)
+
 type Builder struct {
 	msgConfig port.MessageConfig
 }
@@ -41,12 +53,13 @@ func (b *Builder) BuildFiringAttachment(a *alert.Alert, callbackURL, keepUIURL s
 
 	buttons := []post.Button{
 		{
-			ID:   "acknowledge",
-			Name: "Acknowledge",
+			ID:    ActionAcknowledge,
+			Name:  "Acknowledge",
+			Style: ButtonStyleDefault,
 			Integration: post.ButtonIntegration{
 				URL: callbackURL,
 				Context: map[string]string{
-					"action":      "acknowledge",
+					"action":      ActionAcknowledge,
 					"fingerprint": a.Fingerprint().Value(),
 					"alert_name":  a.Name(),
 					"severity":    severity,
@@ -54,12 +67,13 @@ func (b *Builder) BuildFiringAttachment(a *alert.Alert, callbackURL, keepUIURL s
 			},
 		},
 		{
-			ID:   "resolve",
-			Name: "Resolve",
+			ID:    ActionResolve,
+			Name:  "Resolve",
+			Style: ButtonStyleSuccess,
 			Integration: post.ButtonIntegration{
 				URL: callbackURL,
 				Context: map[string]string{
-					"action":      "resolve",
+					"action":      ActionResolve,
 					"fingerprint": a.Fingerprint().Value(),
 					"alert_name":  a.Name(),
 					"severity":    severity,
@@ -97,12 +111,13 @@ func (b *Builder) BuildAcknowledgedAttachment(a *alert.Alert, callbackURL, keepU
 
 	buttons := []post.Button{
 		{
-			ID:   "unacknowledge",
-			Name: "Unacknowledge",
+			ID:    ActionUnacknowledge,
+			Name:  "Unacknowledge",
+			Style: ButtonStyleDefault,
 			Integration: post.ButtonIntegration{
 				URL: callbackURL,
 				Context: map[string]string{
-					"action":      "unacknowledge",
+					"action":      ActionUnacknowledge,
 					"fingerprint": a.Fingerprint().Value(),
 					"alert_name":  a.Name(),
 					"severity":    severity,
@@ -110,12 +125,13 @@ func (b *Builder) BuildAcknowledgedAttachment(a *alert.Alert, callbackURL, keepU
 			},
 		},
 		{
-			ID:   "resolve",
-			Name: "Resolve",
+			ID:    ActionResolve,
+			Name:  "Resolve",
+			Style: ButtonStyleSuccess,
 			Integration: post.ButtonIntegration{
 				URL: callbackURL,
 				Context: map[string]string{
-					"action":      "resolve",
+					"action":      ActionResolve,
 					"fingerprint": a.Fingerprint().Value(),
 					"alert_name":  a.Name(),
 					"severity":    severity,
@@ -155,6 +171,52 @@ func (b *Builder) BuildResolvedAttachment(a *alert.Alert, keepUIURL string) post
 		Title:     title,
 		TitleLink: titleLink,
 		Fields:    fields,
+	}
+}
+
+func (b *Builder) BuildLoadingAttachment(action, alertName, fingerprint, keepUIURL string) post.Attachment {
+	var style string
+	switch action {
+	case ActionResolve:
+		style = ButtonStyleSuccess
+	default:
+		style = ButtonStyleDefault
+	}
+
+	titleLink := fmt.Sprintf("%s/alerts/feed?fingerprint=%s", keepUIURL, url.QueryEscape(fingerprint))
+
+	buttons := []post.Button{
+		{
+			ID:    "processing",
+			Name:  "Processing...",
+			Style: style,
+		},
+	}
+
+	return post.Attachment{
+		Color:     "#808080",
+		Title:     alertName,
+		TitleLink: titleLink,
+		Actions:   buttons,
+	}
+}
+
+func (b *Builder) BuildErrorAttachment(alertName, fingerprint, keepUIURL, errorMsg string) post.Attachment {
+	titleLink := fmt.Sprintf("%s/alerts/feed?fingerprint=%s", keepUIURL, url.QueryEscape(fingerprint))
+
+	buttons := []post.Button{
+		{
+			ID:    "error",
+			Name:  "Error: " + errorMsg,
+			Style: ButtonStyleDanger,
+		},
+	}
+
+	return post.Attachment{
+		Color:     "#FF0000",
+		Title:     alertName,
+		TitleLink: titleLink,
+		Actions:   buttons,
 	}
 }
 

@@ -1,24 +1,19 @@
 package handler
 
 import (
-	"context"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/alexmorbo/keep-mattermost-bridge/application/dto"
+	"github.com/alexmorbo/keep-mattermost-bridge/application/port"
 )
 
-type CallbackHandler interface {
-	Execute(ctx context.Context, input dto.MattermostCallbackInput) (*dto.CallbackOutput, error)
-}
-
 type CallbackHandlerHTTP struct {
-	handleCallback CallbackHandler
+	handleCallback port.CallbackUseCase
 }
 
-func NewCallbackHandler(handleCallback CallbackHandler) *CallbackHandlerHTTP {
+func NewCallbackHandler(handleCallback port.CallbackUseCase) *CallbackHandlerHTTP {
 	return &CallbackHandlerHTTP{handleCallback: handleCallback}
 }
 
@@ -29,14 +24,13 @@ func (h *CallbackHandlerHTTP) HandleCallback(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
-	defer cancel()
-
-	result, err := h.handleCallback.Execute(ctx, input)
+	result, err := h.handleCallback.ExecuteImmediate(input)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
+
+	h.handleCallback.ExecuteAsync(input)
 
 	response := gin.H{
 		"update": gin.H{
@@ -45,7 +39,6 @@ func (h *CallbackHandlerHTTP) HandleCallback(c *gin.Context) {
 				"attachments": []gin.H{attachmentToJSON(result.Attachment)},
 			},
 		},
-		"ephemeral_text": result.Ephemeral,
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -59,7 +52,7 @@ func attachmentToJSON(a dto.AttachmentDTO) gin.H {
 
 	actions := make([]gin.H, len(a.Actions))
 	for i, b := range a.Actions {
-		actions[i] = gin.H{
+		action := gin.H{
 			"id":   b.ID,
 			"name": b.Name,
 			"integration": gin.H{
@@ -67,6 +60,10 @@ func attachmentToJSON(a dto.AttachmentDTO) gin.H {
 				"context": b.Integration.Context,
 			},
 		}
+		if b.Style != "" {
+			action["style"] = b.Style
+		}
+		actions[i] = action
 	}
 
 	result := gin.H{

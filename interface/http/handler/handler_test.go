@@ -9,7 +9,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -34,14 +36,32 @@ func (m *mockAlertExecutor) Execute(ctx context.Context, input dto.KeepAlertInpu
 }
 
 type mockCallbackExecutor struct {
-	executeFunc func(ctx context.Context, input dto.MattermostCallbackInput) (*dto.CallbackOutput, error)
+	executeImmediateFunc func(input dto.MattermostCallbackInput) (*dto.CallbackOutput, error)
+	executeAsyncFunc     func(input dto.MattermostCallbackInput)
+	asyncCalled          bool
+	asyncMu              sync.Mutex
 }
 
-func (m *mockCallbackExecutor) Execute(ctx context.Context, input dto.MattermostCallbackInput) (*dto.CallbackOutput, error) {
-	if m.executeFunc != nil {
-		return m.executeFunc(ctx, input)
+func (m *mockCallbackExecutor) ExecuteImmediate(input dto.MattermostCallbackInput) (*dto.CallbackOutput, error) {
+	if m.executeImmediateFunc != nil {
+		return m.executeImmediateFunc(input)
 	}
 	return &dto.CallbackOutput{}, nil
+}
+
+func (m *mockCallbackExecutor) ExecuteAsync(input dto.MattermostCallbackInput) {
+	m.asyncMu.Lock()
+	m.asyncCalled = true
+	m.asyncMu.Unlock()
+	if m.executeAsyncFunc != nil {
+		m.executeAsyncFunc(input)
+	}
+}
+
+func (m *mockCallbackExecutor) wasAsyncCalled() bool {
+	m.asyncMu.Lock()
+	defer m.asyncMu.Unlock()
+	return m.asyncCalled
 }
 
 type mockPostRepositoryPinger struct {
@@ -170,16 +190,15 @@ func TestWebhookHandlerUseCaseError(t *testing.T) {
 func TestCallbackHandlerValidJSON(t *testing.T) {
 	expectedOutput := &dto.CallbackOutput{
 		Attachment: dto.AttachmentDTO{
-			Color: "#00CC00",
-			Title: "Resolved Alert",
+			Color: "#808080",
+			Title: "test-alert",
 		},
-		Ephemeral: "Alert resolved",
 	}
 
-	called := false
+	immediateCalled := false
 	mockUseCase := &mockCallbackExecutor{
-		executeFunc: func(ctx context.Context, input dto.MattermostCallbackInput) (*dto.CallbackOutput, error) {
-			called = true
+		executeImmediateFunc: func(input dto.MattermostCallbackInput) (*dto.CallbackOutput, error) {
+			immediateCalled = true
 			assert.Equal(t, "user-123", input.UserID)
 			assert.Equal(t, "resolve", input.Context["action"])
 			return expectedOutput, nil
@@ -192,7 +211,9 @@ func TestCallbackHandlerValidJSON(t *testing.T) {
 	router.POST("/callback", handler.HandleCallback)
 
 	callbackInput := dto.MattermostCallbackInput{
-		UserID: "user-123",
+		UserID:    "user-123",
+		PostID:    "post-456",
+		ChannelID: "channel-789",
 		Context: map[string]string{
 			"action":      "resolve",
 			"fingerprint": "abc123",
@@ -211,14 +232,18 @@ func TestCallbackHandlerValidJSON(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.True(t, called, "use case should have been called")
+	assert.True(t, immediateCalled, "immediate use case should have been called")
+
+	time.Sleep(50 * time.Millisecond)
+	assert.True(t, mockUseCase.wasAsyncCalled(), "async use case should have been called")
 
 	var response map[string]interface{}
 	err = json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 
 	assert.NotNil(t, response["update"])
-	assert.Equal(t, "Alert resolved", response["ephemeral_text"])
+	_, hasEphemeral := response["ephemeral_text"]
+	assert.False(t, hasEphemeral, "ephemeral_text should not be present in two-phase response")
 
 	update := response["update"].(map[string]interface{})
 	props := update["props"].(map[string]interface{})
@@ -250,7 +275,7 @@ func TestCallbackHandlerInvalidJSON(t *testing.T) {
 
 func TestCallbackHandlerUseCaseError(t *testing.T) {
 	mockUseCase := &mockCallbackExecutor{
-		executeFunc: func(ctx context.Context, input dto.MattermostCallbackInput) (*dto.CallbackOutput, error) {
+		executeImmediateFunc: func(input dto.MattermostCallbackInput) (*dto.CallbackOutput, error) {
 			return nil, errors.New("callback execution failed")
 		},
 	}
@@ -378,14 +403,13 @@ func TestHealthHandlerMetrics(t *testing.T) {
 
 func TestCallbackHandlerAcknowledgeAction(t *testing.T) {
 	mockUseCase := &mockCallbackExecutor{
-		executeFunc: func(ctx context.Context, input dto.MattermostCallbackInput) (*dto.CallbackOutput, error) {
+		executeImmediateFunc: func(input dto.MattermostCallbackInput) (*dto.CallbackOutput, error) {
 			assert.Equal(t, "acknowledge", input.Context["action"])
 			return &dto.CallbackOutput{
 				Attachment: dto.AttachmentDTO{
-					Color: "#FFA500",
-					Title: "Acknowledged Alert",
+					Color: "#808080",
+					Title: "cpu-alert",
 				},
-				Ephemeral: "Alert acknowledged by @user",
 			}, nil
 		},
 	}
@@ -396,7 +420,9 @@ func TestCallbackHandlerAcknowledgeAction(t *testing.T) {
 	router.POST("/callback", handler.HandleCallback)
 
 	callbackInput := dto.MattermostCallbackInput{
-		UserID: "user-456",
+		UserID:    "user-456",
+		PostID:    "post-123",
+		ChannelID: "channel-456",
 		Context: map[string]string{
 			"action":      "acknowledge",
 			"fingerprint": "xyz789",
@@ -420,7 +446,8 @@ func TestCallbackHandlerAcknowledgeAction(t *testing.T) {
 	err = json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 
-	assert.Equal(t, "Alert acknowledged by @user", response["ephemeral_text"])
+	_, hasEphemeral := response["ephemeral_text"]
+	assert.False(t, hasEphemeral, "ephemeral_text should not be present in two-phase response")
 }
 
 func TestWebhookHandlerMissingFields(t *testing.T) {
@@ -484,9 +511,9 @@ func TestWebhookHandlerEmptyBody(t *testing.T) {
 
 func TestCallbackHandlerMissingContext(t *testing.T) {
 	mockUseCase := &mockCallbackExecutor{
-		executeFunc: func(ctx context.Context, input dto.MattermostCallbackInput) (*dto.CallbackOutput, error) {
+		executeImmediateFunc: func(input dto.MattermostCallbackInput) (*dto.CallbackOutput, error) {
 			assert.NotNil(t, input.Context)
-			return &dto.CallbackOutput{Ephemeral: "processed"}, nil
+			return &dto.CallbackOutput{}, nil
 		},
 	}
 
@@ -540,4 +567,74 @@ func TestNewHealthHandler(t *testing.T) {
 
 	assert.NotNil(t, handler)
 	assert.Equal(t, mockRepo, handler.postRepo)
+}
+
+func TestCallbackHandlerTwoPhaseFlow(t *testing.T) {
+	asyncDone := make(chan struct{})
+	mockUseCase := &mockCallbackExecutor{
+		executeImmediateFunc: func(input dto.MattermostCallbackInput) (*dto.CallbackOutput, error) {
+			return &dto.CallbackOutput{
+				Attachment: dto.AttachmentDTO{
+					Color: "#808080",
+					Title: "Loading...",
+					Actions: []dto.ButtonDTO{
+						{
+							ID:    "processing",
+							Name:  "Processing...",
+							Style: "default",
+						},
+					},
+				},
+			}, nil
+		},
+		executeAsyncFunc: func(input dto.MattermostCallbackInput) {
+			close(asyncDone)
+		},
+	}
+
+	handler := &CallbackHandlerHTTP{handleCallback: mockUseCase}
+
+	router := setupTestRouter()
+	router.POST("/callback", handler.HandleCallback)
+
+	callbackInput := dto.MattermostCallbackInput{
+		UserID:    "user-123",
+		PostID:    "post-456",
+		ChannelID: "channel-789",
+		Context: map[string]string{
+			"action":      "acknowledge",
+			"fingerprint": "fp-123",
+			"alert_name":  "test-alert",
+		},
+	}
+
+	body, err := json.Marshal(callbackInput)
+	require.NoError(t, err)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "/callback", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+
+	update := response["update"].(map[string]interface{})
+	props := update["props"].(map[string]interface{})
+	attachments := props["attachments"].([]interface{})
+	assert.Len(t, attachments, 1)
+
+	attachment := attachments[0].(map[string]interface{})
+	assert.Equal(t, "#808080", attachment["color"])
+
+	select {
+	case <-asyncDone:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Async execution did not complete in time")
+	}
 }

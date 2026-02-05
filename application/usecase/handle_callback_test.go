@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ type mockKeepClient struct {
 	createWorkflowCalled  bool
 	createdWebhookConfig  port.WebhookProviderConfig
 	createdWorkflowConfig port.WorkflowConfig
+	mu                    sync.Mutex
 }
 
 func newMockKeepClient() *mockKeepClient {
@@ -55,6 +57,8 @@ func newMockKeepClient() *mockKeepClient {
 }
 
 func (m *mockKeepClient) EnrichAlert(ctx context.Context, fingerprint string, enrichments map[string]string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.enrichAlertCalled = true
 	m.enrichedFingerprint = fingerprint
 	m.enrichedEnrichments = enrichments
@@ -62,6 +66,12 @@ func (m *mockKeepClient) EnrichAlert(ctx context.Context, fingerprint string, en
 		return m.enrichAlertErr
 	}
 	return nil
+}
+
+func (m *mockKeepClient) wasEnrichAlertCalled() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.enrichAlertCalled
 }
 
 func (m *mockKeepClient) GetAlert(ctx context.Context, fingerprint string) (*port.KeepAlert, error) {
@@ -74,12 +84,20 @@ func (m *mockKeepClient) GetAlert(ctx context.Context, fingerprint string) (*por
 }
 
 func (m *mockKeepClient) UnenrichAlert(ctx context.Context, fingerprint string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.unenrichAlertCalled = true
 	m.unenrichFingerprint = fingerprint
 	if m.unenrichAlertErr != nil {
 		return m.unenrichAlertErr
 	}
 	return nil
+}
+
+func (m *mockKeepClient) wasUnenrichAlertCalled() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.unenrichAlertCalled
 }
 
 func (m *mockKeepClient) GetProviders(ctx context.Context) ([]port.KeepProvider, error) {
@@ -95,7 +113,6 @@ func (m *mockKeepClient) CreateWebhookProvider(ctx context.Context, config port.
 	if m.createWebhookErr != nil {
 		return m.createWebhookErr
 	}
-	// Simulate provider being created - add to providers list
 	m.providers = append(m.providers, port.KeepProvider{
 		ID:   "created-provider-id",
 		Type: "webhook",
@@ -133,13 +150,20 @@ func (m *mockUserMapper) GetKeepUsername(mattermostUsername string) (string, boo
 }
 
 type mockMattermostClientCallback struct {
-	getUserErr    error
-	getUserFunc   func(ctx context.Context, userID string) (string, error)
-	getUserCalled bool
+	getUserErr         error
+	getUserFunc        func(ctx context.Context, userID string) (string, error)
+	getUserCalled      bool
+	updatePostCalled   bool
+	updatePostErr      error
+	replyToThreadErr   error
+	replyToThreadCalls []string
+	mu                 sync.Mutex
 }
 
 func newMockMattermostClientCallback() *mockMattermostClientCallback {
-	return &mockMattermostClientCallback{}
+	return &mockMattermostClientCallback{
+		replyToThreadCalls: make([]string, 0),
+	}
 }
 
 func (m *mockMattermostClientCallback) CreatePost(ctx context.Context, channelID string, attachment post.Attachment) (string, error) {
@@ -147,7 +171,16 @@ func (m *mockMattermostClientCallback) CreatePost(ctx context.Context, channelID
 }
 
 func (m *mockMattermostClientCallback) UpdatePost(ctx context.Context, postID string, attachment post.Attachment) error {
-	return nil
+	m.mu.Lock()
+	m.updatePostCalled = true
+	m.mu.Unlock()
+	return m.updatePostErr
+}
+
+func (m *mockMattermostClientCallback) wasUpdatePostCalled() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.updatePostCalled
 }
 
 func (m *mockMattermostClientCallback) GetUser(ctx context.Context, userID string) (string, error) {
@@ -159,6 +192,19 @@ func (m *mockMattermostClientCallback) GetUser(ctx context.Context, userID strin
 		return "", m.getUserErr
 	}
 	return "testuser", nil
+}
+
+func (m *mockMattermostClientCallback) ReplyToThread(ctx context.Context, channelID, rootID, message string) error {
+	m.mu.Lock()
+	m.replyToThreadCalls = append(m.replyToThreadCalls, message)
+	m.mu.Unlock()
+	return m.replyToThreadErr
+}
+
+func (m *mockMattermostClientCallback) getReplyToThreadCalls() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.replyToThreadCalls
 }
 
 type mockMessageBuilderCallback struct{}
@@ -184,6 +230,21 @@ func (m *mockMessageBuilderCallback) BuildResolvedAttachment(a *alert.Alert, kee
 	}
 }
 
+func (m *mockMessageBuilderCallback) BuildLoadingAttachment(action, alertName, fingerprint, keepUIURL string) post.Attachment {
+	return post.Attachment{
+		Color: "#808080",
+		Title: alertName,
+	}
+}
+
+func (m *mockMessageBuilderCallback) BuildErrorAttachment(alertName, fingerprint, keepUIURL, errorMsg string) post.Attachment {
+	return post.Attachment{
+		Color: "#FF0000",
+		Title: alertName,
+		Text:  "Error: " + errorMsg,
+	}
+}
+
 func setupHandleCallbackUseCase() (*HandleCallbackUseCase, *mockPostRepository, *mockKeepClient, *mockMattermostClientCallback, *mockUserMapper) {
 	postRepo := newMockPostRepository()
 	keepClient := newMockKeepClient()
@@ -206,67 +267,31 @@ func setupHandleCallbackUseCase() (*HandleCallbackUseCase, *mockPostRepository, 
 	return uc, postRepo, keepClient, mmClient, userMapper
 }
 
-func TestHandleCallbackUseCase_Acknowledge(t *testing.T) {
-	uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
-	ctx := context.Background()
+func TestHandleCallbackUseCase_ExecuteImmediate_ReturnsLoadingState(t *testing.T) {
+	uc, _, _, _, _ := setupHandleCallbackUseCase()
 
 	input := dto.MattermostCallbackInput{
-		UserID: "user-123",
+		UserID:    "user-123",
+		PostID:    "post-456",
+		ChannelID: "channel-789",
 		Context: map[string]string{
 			"action":      "acknowledge",
 			"fingerprint": "fp-12345",
+			"alert_name":  "Test Alert",
 		},
 	}
 
-	result, err := uc.Execute(ctx, input)
+	result, err := uc.ExecuteImmediate(input)
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	uc.Wait()
-	assert.True(t, keepClient.enrichAlertCalled)
-	assert.Equal(t, "fp-12345", keepClient.enrichedFingerprint)
-	assert.Equal(t, "acknowledged", keepClient.enrichedEnrichments["status"])
-	assert.Contains(t, result.Ephemeral, "Alert acknowledged by @testuser")
-	assert.Equal(t, "#FFA500", result.Attachment.Color)
-	assert.Contains(t, result.Attachment.Title, "ACKNOWLEDGED")
+	assert.Equal(t, "#808080", result.Attachment.Color)
+	assert.Equal(t, "Test Alert", result.Attachment.Title)
+	assert.Empty(t, result.Ephemeral)
 }
 
-func TestHandleCallbackUseCase_Resolve(t *testing.T) {
-	uc, postRepo, keepClient, _, _ := setupHandleCallbackUseCase()
-	ctx := context.Background()
-
-	fp, _ := alert.NewFingerprint("fp-12345")
-	existingPost := post.NewPost("post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"))
-	postRepo.posts[fp.Value()] = existingPost
-
-	input := dto.MattermostCallbackInput{
-		UserID: "user-123",
-		Context: map[string]string{
-			"action":      "resolve",
-			"fingerprint": "fp-12345",
-		},
-	}
-
-	result, err := uc.Execute(ctx, input)
-
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	uc.Wait()
-	assert.True(t, keepClient.enrichAlertCalled)
-	assert.Equal(t, "fp-12345", keepClient.enrichedFingerprint)
-	assert.Equal(t, "resolved", keepClient.enrichedEnrichments["status"])
-	assert.True(t, postRepo.deleteCalled)
-	assert.Contains(t, result.Ephemeral, "Alert resolved by @testuser")
-	assert.Equal(t, "#00CC00", result.Attachment.Color)
-	assert.Contains(t, result.Attachment.Title, "RESOLVED")
-
-	_, err = postRepo.FindByFingerprint(ctx, fp)
-	assert.Equal(t, post.ErrNotFound, err)
-}
-
-func TestHandleCallbackUseCase_MissingFingerprint(t *testing.T) {
+func TestHandleCallbackUseCase_ExecuteImmediate_MissingFingerprint(t *testing.T) {
 	uc, _, _, _, _ := setupHandleCallbackUseCase()
-	ctx := context.Background()
 
 	input := dto.MattermostCallbackInput{
 		UserID: "user-123",
@@ -275,253 +300,267 @@ func TestHandleCallbackUseCase_MissingFingerprint(t *testing.T) {
 		},
 	}
 
-	_, err := uc.Execute(ctx, input)
+	_, err := uc.ExecuteImmediate(input)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse fingerprint")
 }
 
-func TestHandleCallbackUseCase_EmptyFingerprint(t *testing.T) {
-	uc, _, _, _, _ := setupHandleCallbackUseCase()
-	ctx := context.Background()
-
+func TestHandleCallbackUseCase_ExecuteAsync_Acknowledge(t *testing.T) {
+	uc, _, keepClient, mmClient, _ := setupHandleCallbackUseCase()
 	input := dto.MattermostCallbackInput{
-		UserID: "user-123",
-		Context: map[string]string{
-			"action":      "acknowledge",
-			"fingerprint": "",
-		},
-	}
-
-	_, err := uc.Execute(ctx, input)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parse fingerprint")
-}
-
-func TestHandleCallbackUseCase_InvalidSeverity(t *testing.T) {
-	uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
-	ctx := context.Background()
-
-	keepClient.getAlertResponse.Severity = "invalid"
-
-	input := dto.MattermostCallbackInput{
-		UserID: "user-123",
+		UserID:    "user-123",
+		PostID:    "post-456",
+		ChannelID: "channel-789",
 		Context: map[string]string{
 			"action":      "acknowledge",
 			"fingerprint": "fp-12345",
+			"alert_name":  "Test Alert",
 		},
 	}
 
-	_, err := uc.Execute(ctx, input)
+	uc.ExecuteAsync(input)
+	uc.Wait()
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parse severity")
+	assert.True(t, keepClient.wasEnrichAlertCalled())
+	assert.Equal(t, "fp-12345", keepClient.enrichedFingerprint)
+	assert.Equal(t, "acknowledged", keepClient.enrichedEnrichments["status"])
+	assert.True(t, mmClient.wasUpdatePostCalled())
+	replies := mmClient.getReplyToThreadCalls()
+	require.Len(t, replies, 1)
+	assert.Contains(t, replies[0], "Acknowledged by @testuser")
 }
 
-func TestHandleCallbackUseCase_GetAlertError(t *testing.T) {
-	uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
-	ctx := context.Background()
+func TestHandleCallbackUseCase_ExecuteAsync_Resolve(t *testing.T) {
+	uc, postRepo, keepClient, mmClient, _ := setupHandleCallbackUseCase()
+
+	fp, _ := alert.NewFingerprint("fp-12345")
+	existingPost := post.NewPost("post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"))
+	postRepo.posts[fp.Value()] = existingPost
+
+	input := dto.MattermostCallbackInput{
+		UserID:    "user-123",
+		PostID:    "post-456",
+		ChannelID: "channel-789",
+		Context: map[string]string{
+			"action":      "resolve",
+			"fingerprint": "fp-12345",
+			"alert_name":  "Test Alert",
+		},
+	}
+
+	uc.ExecuteAsync(input)
+	uc.Wait()
+
+	assert.True(t, keepClient.wasEnrichAlertCalled())
+	assert.Equal(t, "resolved", keepClient.enrichedEnrichments["status"])
+	assert.True(t, postRepo.deleteCalled)
+	assert.True(t, mmClient.wasUpdatePostCalled())
+	replies := mmClient.getReplyToThreadCalls()
+	require.Len(t, replies, 1)
+	assert.Contains(t, replies[0], "Resolved by @testuser")
+}
+
+func TestHandleCallbackUseCase_ExecuteAsync_Unacknowledge(t *testing.T) {
+	uc, _, keepClient, mmClient, _ := setupHandleCallbackUseCase()
+	input := dto.MattermostCallbackInput{
+		UserID:    "user-123",
+		PostID:    "post-456",
+		ChannelID: "channel-789",
+		Context: map[string]string{
+			"action":      "unacknowledge",
+			"fingerprint": "fp-12345",
+			"alert_name":  "Test Alert",
+		},
+	}
+
+	uc.ExecuteAsync(input)
+	uc.Wait()
+
+	assert.True(t, keepClient.wasUnenrichAlertCalled())
+	assert.Equal(t, "fp-12345", keepClient.unenrichFingerprint)
+	assert.True(t, mmClient.wasUpdatePostCalled())
+	replies := mmClient.getReplyToThreadCalls()
+	require.Len(t, replies, 1)
+	assert.Contains(t, replies[0], "Unacknowledged by @testuser")
+}
+
+func TestHandleCallbackUseCase_ExecuteAsync_GetAlertError(t *testing.T) {
+	uc, _, keepClient, mmClient, _ := setupHandleCallbackUseCase()
 
 	keepClient.getAlertErr = errors.New("keep api error")
 
 	input := dto.MattermostCallbackInput{
-		UserID: "user-123",
+		UserID:    "user-123",
+		PostID:    "post-456",
+		ChannelID: "channel-789",
 		Context: map[string]string{
 			"action":      "acknowledge",
 			"fingerprint": "fp-12345",
+			"alert_name":  "Test Alert",
 		},
 	}
 
-	_, err := uc.Execute(ctx, input)
+	uc.ExecuteAsync(input)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "get alert from keep")
+	assert.False(t, keepClient.wasEnrichAlertCalled())
+	assert.False(t, mmClient.wasUpdatePostCalled())
 }
 
-func TestHandleCallbackUseCase_EnrichAPIError(t *testing.T) {
-	uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
-	ctx := context.Background()
-
-	keepClient.enrichAlertErr = errors.New("keep api error")
-
-	input := dto.MattermostCallbackInput{
-		UserID: "user-123",
-		Context: map[string]string{
-			"action":      "acknowledge",
-			"fingerprint": "fp-12345",
-		},
-	}
-
-	result, err := uc.Execute(ctx, input)
-
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	uc.Wait()
-	assert.True(t, keepClient.enrichAlertCalled)
-	assert.Contains(t, result.Ephemeral, "Alert acknowledged by @testuser")
-}
-
-func TestHandleCallbackUseCase_PostNotFoundOnResolve(t *testing.T) {
-	uc, postRepo, keepClient, _, _ := setupHandleCallbackUseCase()
-	ctx := context.Background()
-
-	input := dto.MattermostCallbackInput{
-		UserID: "user-123",
-		Context: map[string]string{
-			"action":      "resolve",
-			"fingerprint": "fp-12345",
-		},
-	}
-
-	result, err := uc.Execute(ctx, input)
-
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	uc.Wait()
-	assert.True(t, keepClient.enrichAlertCalled)
-	assert.True(t, postRepo.deleteCalled)
-	assert.Contains(t, result.Ephemeral, "Alert resolved by @testuser")
-}
-
-func TestHandleCallbackUseCase_UnknownAction(t *testing.T) {
-	uc, _, _, _, _ := setupHandleCallbackUseCase()
-	ctx := context.Background()
-
-	input := dto.MattermostCallbackInput{
-		UserID: "user-123",
-		Context: map[string]string{
-			"action":      "unknown",
-			"fingerprint": "fp-12345",
-		},
-	}
-
-	_, err := uc.Execute(ctx, input)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown action")
-}
-
-func TestHandleCallbackUseCase_GetUserError(t *testing.T) {
+func TestHandleCallbackUseCase_ExecuteAsync_InvalidSeverity(t *testing.T) {
 	uc, _, keepClient, mmClient, _ := setupHandleCallbackUseCase()
-	ctx := context.Background()
+
+	keepClient.getAlertResponse.Severity = "invalid"
+
+	input := dto.MattermostCallbackInput{
+		UserID:    "user-123",
+		PostID:    "post-456",
+		ChannelID: "channel-789",
+		Context: map[string]string{
+			"action":      "acknowledge",
+			"fingerprint": "fp-12345",
+			"alert_name":  "Test Alert",
+		},
+	}
+
+	uc.ExecuteAsync(input)
+
+	assert.False(t, keepClient.wasEnrichAlertCalled())
+	assert.False(t, mmClient.wasUpdatePostCalled())
+}
+
+func TestHandleCallbackUseCase_ExecuteAsync_GetUserError(t *testing.T) {
+	uc, _, keepClient, mmClient, _ := setupHandleCallbackUseCase()
 
 	mmClient.getUserErr = errors.New("user not found")
 
 	input := dto.MattermostCallbackInput{
-		UserID: "user-123",
+		UserID:    "user-123",
+		PostID:    "post-456",
+		ChannelID: "channel-789",
 		Context: map[string]string{
 			"action":      "acknowledge",
 			"fingerprint": "fp-12345",
+			"alert_name":  "Test Alert",
 		},
 	}
 
-	result, err := uc.Execute(ctx, input)
-
-	require.NoError(t, err)
-	require.NotNil(t, result)
+	uc.ExecuteAsync(input)
 	uc.Wait()
-	assert.True(t, keepClient.enrichAlertCalled)
-	assert.Contains(t, result.Ephemeral, "user-123")
+
+	assert.True(t, keepClient.wasEnrichAlertCalled())
+	replies := mmClient.getReplyToThreadCalls()
+	require.Len(t, replies, 1)
+	assert.Contains(t, replies[0], "user-123")
 }
 
-func TestHandleCallbackUseCase_ResolveDeleteError(t *testing.T) {
-	uc, postRepo, _, _, _ := setupHandleCallbackUseCase()
-	ctx := context.Background()
+func TestHandleCallbackUseCase_ExecuteAsync_EnrichAPIError(t *testing.T) {
+	uc, _, keepClient, mmClient, _ := setupHandleCallbackUseCase()
 
-	postRepo.deleteErr = errors.New("database error")
+	keepClient.enrichAlertErr = errors.New("keep api error")
 
 	input := dto.MattermostCallbackInput{
-		UserID: "user-123",
+		UserID:    "user-123",
+		PostID:    "post-456",
+		ChannelID: "channel-789",
 		Context: map[string]string{
-			"action":      "resolve",
+			"action":      "acknowledge",
 			"fingerprint": "fp-12345",
+			"alert_name":  "Test Alert",
 		},
 	}
 
-	_, err := uc.Execute(ctx, input)
+	uc.ExecuteAsync(input)
+	uc.Wait()
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "delete post from store")
+	assert.True(t, keepClient.wasEnrichAlertCalled())
+	assert.True(t, mmClient.wasUpdatePostCalled())
 }
 
-func TestHandleCallbackUseCase_AcknowledgeWithDifferentSeverities(t *testing.T) {
-	severities := []string{"critical", "high", "warning", "info", "low"}
-
-	for _, severity := range severities {
-		t.Run("severity_"+severity, func(t *testing.T) {
-			uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
-			ctx := context.Background()
-
-			keepClient.getAlertResponse.Severity = severity
-
-			input := dto.MattermostCallbackInput{
-				UserID: "user-123",
-				Context: map[string]string{
-					"action":      "acknowledge",
-					"fingerprint": "fp-12345",
-				},
-			}
-
-			result, err := uc.Execute(ctx, input)
-
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			uc.Wait()
-			assert.True(t, keepClient.enrichAlertCalled)
-			assert.Contains(t, result.Ephemeral, "Alert acknowledged by @testuser")
-		})
+func TestHandleCallbackUseCase_ExecuteAsync_UnknownAction(t *testing.T) {
+	uc, _, keepClient, mmClient, _ := setupHandleCallbackUseCase()
+	input := dto.MattermostCallbackInput{
+		UserID:    "user-123",
+		PostID:    "post-456",
+		ChannelID: "channel-789",
+		Context: map[string]string{
+			"action":      "unknown",
+			"fingerprint": "fp-12345",
+			"alert_name":  "Test Alert",
+		},
 	}
+
+	uc.ExecuteAsync(input)
+
+	assert.False(t, keepClient.wasEnrichAlertCalled())
+	assert.False(t, mmClient.wasUpdatePostCalled())
 }
 
-func TestHandleCallbackUseCase_ResolveWithDifferentSeverities(t *testing.T) {
-	severities := []string{"critical", "high", "warning", "info", "low"}
+func TestHandleCallbackUseCase_ExecuteAsync_AcknowledgeWithUserMapping(t *testing.T) {
+	uc, _, keepClient, _, userMapper := setupHandleCallbackUseCase()
 
-	for _, severity := range severities {
-		t.Run("severity_"+severity, func(t *testing.T) {
-			uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
-			ctx := context.Background()
+	userMapper.mapping["testuser"] = "keep-user"
 
-			keepClient.getAlertResponse.Severity = severity
-
-			input := dto.MattermostCallbackInput{
-				UserID: "user-123",
-				Context: map[string]string{
-					"action":      "resolve",
-					"fingerprint": "fp-12345",
-				},
-			}
-
-			result, err := uc.Execute(ctx, input)
-
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			uc.Wait()
-			assert.True(t, keepClient.enrichAlertCalled)
-			assert.Contains(t, result.Ephemeral, "Alert resolved by @testuser")
-		})
+	input := dto.MattermostCallbackInput{
+		UserID:    "user-123",
+		PostID:    "post-456",
+		ChannelID: "channel-789",
+		Context: map[string]string{
+			"action":      "acknowledge",
+			"fingerprint": "fp-12345",
+			"alert_name":  "Test Alert",
+		},
 	}
+
+	uc.ExecuteAsync(input)
+	uc.Wait()
+
+	assert.True(t, keepClient.wasEnrichAlertCalled())
+	assert.Equal(t, "acknowledged", keepClient.enrichedEnrichments["status"])
+	assert.Equal(t, "keep-user", keepClient.enrichedEnrichments["assignee"])
+}
+
+func TestHandleCallbackUseCase_ExecuteAsync_AcknowledgeWithoutUserMapping(t *testing.T) {
+	uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
+	input := dto.MattermostCallbackInput{
+		UserID:    "user-123",
+		PostID:    "post-456",
+		ChannelID: "channel-789",
+		Context: map[string]string{
+			"action":      "acknowledge",
+			"fingerprint": "fp-12345",
+			"alert_name":  "Test Alert",
+		},
+	}
+
+	uc.ExecuteAsync(input)
+	uc.Wait()
+
+	assert.True(t, keepClient.wasEnrichAlertCalled())
+	assert.Equal(t, "acknowledged", keepClient.enrichedEnrichments["status"])
+	_, hasAssignee := keepClient.enrichedEnrichments["assignee"]
+	assert.False(t, hasAssignee, "should not have assignee when no mapping exists")
 }
 
 func TestHandleCallbackUseCase_Wait(t *testing.T) {
 	t.Run("wait completes after background goroutines finish", func(t *testing.T) {
 		uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
-		ctx := context.Background()
 
 		input := dto.MattermostCallbackInput{
-			UserID: "user-123",
+			UserID:    "user-123",
+			PostID:    "post-456",
+			ChannelID: "channel-789",
 			Context: map[string]string{
 				"action":      "acknowledge",
 				"fingerprint": "fp-12345",
+				"alert_name":  "Test Alert",
 			},
 		}
 
-		_, err := uc.Execute(ctx, input)
-		require.NoError(t, err)
-
+		uc.ExecuteAsync(input)
 		uc.Wait()
 
-		assert.True(t, keepClient.enrichAlertCalled)
+		assert.True(t, keepClient.wasEnrichAlertCalled())
 	})
 
 	t.Run("wait returns immediately when no goroutines pending", func(t *testing.T) {
@@ -541,87 +580,86 @@ func TestHandleCallbackUseCase_Wait(t *testing.T) {
 	})
 }
 
-func TestHandleCallbackUseCase_Unacknowledge(t *testing.T) {
-	uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
-	ctx := context.Background()
-
-	input := dto.MattermostCallbackInput{
-		UserID: "user-123",
-		Context: map[string]string{
-			"action":      "unacknowledge",
-			"fingerprint": "fp-12345",
-		},
-	}
-
-	result, err := uc.Execute(ctx, input)
-
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	uc.Wait()
-	assert.True(t, keepClient.unenrichAlertCalled)
-	assert.Equal(t, "fp-12345", keepClient.unenrichFingerprint)
-	assert.Contains(t, result.Ephemeral, "Alert unacknowledged by @testuser")
-	assert.Equal(t, "#FF0000", result.Attachment.Color)
-	assert.Contains(t, result.Attachment.Title, "FIRING")
-}
-
-func TestHandleCallbackUseCase_UnacknowledgeAPIError(t *testing.T) {
-	uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
-	ctx := context.Background()
-
-	keepClient.unenrichAlertErr = errors.New("keep api error")
-
-	input := dto.MattermostCallbackInput{
-		UserID: "user-123",
-		Context: map[string]string{
-			"action":      "unacknowledge",
-			"fingerprint": "fp-12345",
-		},
-	}
-
-	result, err := uc.Execute(ctx, input)
-
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	uc.Wait()
-	assert.True(t, keepClient.unenrichAlertCalled)
-	assert.Contains(t, result.Ephemeral, "Alert unacknowledged by @testuser")
-}
-
-func TestHandleCallbackUseCase_UnacknowledgeWithDifferentSeverities(t *testing.T) {
+func TestHandleCallbackUseCase_ExecuteAsync_DifferentSeverities(t *testing.T) {
 	severities := []string{"critical", "high", "warning", "info", "low"}
 
 	for _, severity := range severities {
 		t.Run("severity_"+severity, func(t *testing.T) {
 			uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
-			ctx := context.Background()
 
 			keepClient.getAlertResponse.Severity = severity
 
 			input := dto.MattermostCallbackInput{
-				UserID: "user-123",
+				UserID:    "user-123",
+				PostID:    "post-456",
+				ChannelID: "channel-789",
 				Context: map[string]string{
-					"action":      "unacknowledge",
+					"action":      "acknowledge",
 					"fingerprint": "fp-12345",
+					"alert_name":  "Test Alert",
 				},
 			}
 
-			result, err := uc.Execute(ctx, input)
-
-			require.NoError(t, err)
-			require.NotNil(t, result)
+			uc.ExecuteAsync(input)
 			uc.Wait()
-			assert.True(t, keepClient.unenrichAlertCalled)
-			assert.Contains(t, result.Ephemeral, "Alert unacknowledged by @testuser")
+
+			assert.True(t, keepClient.wasEnrichAlertCalled())
 		})
 	}
 }
 
-func TestHandleCallbackUseCase_AcknowledgeWithUserMapping(t *testing.T) {
-	uc, _, keepClient, _, userMapper := setupHandleCallbackUseCase()
-	ctx := context.Background()
+func TestHandleCallbackUseCase_ExecuteAsync_UpdatePostError(t *testing.T) {
+	uc, _, keepClient, mmClient, _ := setupHandleCallbackUseCase()
 
-	userMapper.mapping["testuser"] = "keep-user"
+	mmClient.updatePostErr = errors.New("update post error")
+
+	input := dto.MattermostCallbackInput{
+		UserID:    "user-123",
+		PostID:    "post-456",
+		ChannelID: "channel-789",
+		Context: map[string]string{
+			"action":      "acknowledge",
+			"fingerprint": "fp-12345",
+			"alert_name":  "Test Alert",
+		},
+	}
+
+	uc.ExecuteAsync(input)
+	uc.Wait()
+
+	assert.True(t, keepClient.wasEnrichAlertCalled())
+	assert.True(t, mmClient.wasUpdatePostCalled())
+	replies := mmClient.getReplyToThreadCalls()
+	assert.Len(t, replies, 1, "should still attempt to reply to thread even if update fails")
+}
+
+func TestHandleCallbackUseCase_ExecuteAsync_ReplyToThreadError(t *testing.T) {
+	uc, _, keepClient, mmClient, _ := setupHandleCallbackUseCase()
+
+	mmClient.replyToThreadErr = errors.New("reply to thread error")
+
+	input := dto.MattermostCallbackInput{
+		UserID:    "user-123",
+		PostID:    "post-456",
+		ChannelID: "channel-789",
+		Context: map[string]string{
+			"action":      "acknowledge",
+			"fingerprint": "fp-12345",
+			"alert_name":  "Test Alert",
+		},
+	}
+
+	uc.ExecuteAsync(input)
+	uc.Wait()
+
+	assert.True(t, keepClient.wasEnrichAlertCalled())
+	assert.True(t, mmClient.wasUpdatePostCalled())
+	replies := mmClient.getReplyToThreadCalls()
+	assert.Len(t, replies, 1, "should attempt to reply even if it will fail")
+}
+
+func TestHandleCallbackUseCase_ExecuteImmediate_MissingAlertName(t *testing.T) {
+	uc, _, _, _, _ := setupHandleCallbackUseCase()
 
 	input := dto.MattermostCallbackInput{
 		UserID: "user-123",
@@ -631,61 +669,8 @@ func TestHandleCallbackUseCase_AcknowledgeWithUserMapping(t *testing.T) {
 		},
 	}
 
-	result, err := uc.Execute(ctx, input)
+	_, err := uc.ExecuteImmediate(input)
 
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	uc.Wait()
-	assert.True(t, keepClient.enrichAlertCalled)
-	assert.Equal(t, "fp-12345", keepClient.enrichedFingerprint)
-	assert.Equal(t, "acknowledged", keepClient.enrichedEnrichments["status"])
-	assert.Equal(t, "keep-user", keepClient.enrichedEnrichments["assignee"])
-}
-
-func TestHandleCallbackUseCase_ResolveWithUserMapping(t *testing.T) {
-	uc, _, keepClient, _, userMapper := setupHandleCallbackUseCase()
-	ctx := context.Background()
-
-	userMapper.mapping["testuser"] = "keep-user"
-
-	input := dto.MattermostCallbackInput{
-		UserID: "user-123",
-		Context: map[string]string{
-			"action":      "resolve",
-			"fingerprint": "fp-12345",
-		},
-	}
-
-	result, err := uc.Execute(ctx, input)
-
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	uc.Wait()
-	assert.True(t, keepClient.enrichAlertCalled)
-	assert.Equal(t, "fp-12345", keepClient.enrichedFingerprint)
-	assert.Equal(t, "resolved", keepClient.enrichedEnrichments["status"])
-	assert.Equal(t, "keep-user", keepClient.enrichedEnrichments["assignee"])
-}
-
-func TestHandleCallbackUseCase_AcknowledgeWithoutUserMapping(t *testing.T) {
-	uc, _, keepClient, _, _ := setupHandleCallbackUseCase()
-	ctx := context.Background()
-
-	input := dto.MattermostCallbackInput{
-		UserID: "user-123",
-		Context: map[string]string{
-			"action":      "acknowledge",
-			"fingerprint": "fp-12345",
-		},
-	}
-
-	result, err := uc.Execute(ctx, input)
-
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	uc.Wait()
-	assert.True(t, keepClient.enrichAlertCalled)
-	assert.Equal(t, "acknowledged", keepClient.enrichedEnrichments["status"])
-	_, hasAssignee := keepClient.enrichedEnrichments["assignee"]
-	assert.False(t, hasAssignee, "should not have assignee when no mapping exists")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alert_name")
 }

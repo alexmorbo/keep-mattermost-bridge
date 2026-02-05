@@ -25,6 +25,10 @@ var (
 	mmUpdatePostOK  = metrics.NewCounter(`mattermost_api_calls_total{operation="update_post",status="ok"}`)
 	mmUpdatePostErr = metrics.NewCounter(`mattermost_api_calls_total{operation="update_post",status="error"}`)
 	mmUpdatePostDur = metrics.NewHistogram(`mattermost_api_duration_seconds{operation="update_post"}`)
+
+	mmReplyToThreadOK  = metrics.NewCounter(`mattermost_api_calls_total{operation="reply_to_thread",status="ok"}`)
+	mmReplyToThreadErr = metrics.NewCounter(`mattermost_api_calls_total{operation="reply_to_thread",status="error"}`)
+	mmReplyToThreadDur = metrics.NewHistogram(`mattermost_api_duration_seconds{operation="reply_to_thread"}`)
 )
 
 type Client struct {
@@ -66,6 +70,12 @@ type updatePostRequest struct {
 	Props   map[string]any `json:"props,omitempty"`
 }
 
+type replyPostRequest struct {
+	ChannelID string `json:"channel_id"`
+	RootID    string `json:"root_id"`
+	Message   string `json:"message"`
+}
+
 type userResponse struct {
 	Username string `json:"username"`
 }
@@ -91,6 +101,7 @@ type wireButton struct {
 	Type        string                `json:"type"`
 	ID          string                `json:"id"`
 	Name        string                `json:"name"`
+	Style       string                `json:"style,omitempty"`
 	Integration wireButtonIntegration `json:"integration"`
 }
 
@@ -108,9 +119,10 @@ func toWireAttachment(a post.Attachment) wireAttachment {
 	buttons := make([]wireButton, len(a.Actions))
 	for i, b := range a.Actions {
 		buttons[i] = wireButton{
-			Type: "button",
-			ID:   b.ID,
-			Name: b.Name,
+			Type:  "button",
+			ID:    b.ID,
+			Name:  b.Name,
+			Style: b.Style,
 			Integration: wireButtonIntegration{
 				URL:     b.Integration.URL,
 				Context: b.Integration.Context,
@@ -282,4 +294,57 @@ func (c *Client) GetUser(ctx context.Context, userID string) (string, error) {
 	)
 
 	return result.Username, nil
+}
+
+func (c *Client) ReplyToThread(ctx context.Context, channelID, rootID, message string) error {
+	start := time.Now()
+	reqURL := c.baseURL + "/api/v4/posts"
+
+	body := replyPostRequest{
+		ChannelID: channelID,
+		RootID:    rootID,
+		Message:   message,
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal reply body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(jsonBody))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		duration := time.Since(start).Milliseconds()
+		c.logger.Error("Mattermost ReplyToThread failed",
+			logger.ExternalFieldsWithError("mattermost", reqURL, "POST", 0, duration, err.Error()),
+		)
+		mmReplyToThreadErr.Inc()
+		return fmt.Errorf("mattermost reply to thread: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	duration := time.Since(start).Milliseconds()
+
+	if resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		c.logger.Error("Mattermost ReplyToThread non-201",
+			logger.ExternalFieldsWithError("mattermost", reqURL, "POST", resp.StatusCode, duration, string(respBody)),
+		)
+		mmReplyToThreadErr.Inc()
+		return fmt.Errorf("mattermost reply to thread: status %d, body: %s", resp.StatusCode, respBody)
+	}
+
+	c.logger.Debug("Mattermost ReplyToThread completed",
+		logger.ExternalFields("mattermost", reqURL, "POST", resp.StatusCode, duration),
+	)
+	mmReplyToThreadOK.Inc()
+	mmReplyToThreadDur.Update(float64(duration) / 1000)
+
+	return nil
 }

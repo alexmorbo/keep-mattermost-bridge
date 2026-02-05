@@ -438,3 +438,86 @@ func TestCreatePostJSONDecodeError(t *testing.T) {
 	assert.Empty(t, postID)
 	assert.Contains(t, err.Error(), "decode create post response")
 }
+
+func TestReplyToThreadSuccess(t *testing.T) {
+	var capturedRequest replyPostRequest
+	var capturedMethod string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v4/posts", r.URL.Path)
+		capturedMethod = r.Method
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+		authHeader := r.Header.Get("Authorization")
+		require.Contains(t, authHeader, "Bearer test-token")
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		err = json.Unmarshal(body, &capturedRequest)
+		require.NoError(t, err)
+
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": "reply-123"})
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client := NewClient(server.URL, "test-token", logger)
+
+	err := client.ReplyToThread(context.Background(), "channel-456", "post-789", "Test reply message")
+	require.NoError(t, err)
+	assert.Equal(t, http.MethodPost, capturedMethod)
+	assert.Equal(t, "channel-456", capturedRequest.ChannelID)
+	assert.Equal(t, "post-789", capturedRequest.RootID)
+	assert.Equal(t, "Test reply message", capturedRequest.Message)
+}
+
+func TestReplyToThreadServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error": "server error"}`))
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client := NewClient(server.URL, "test-token", logger)
+
+	err := client.ReplyToThread(context.Background(), "channel-123", "post-456", "Test message")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "status 500")
+}
+
+func TestReplyToThreadNetworkError(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client := NewClient("http://localhost:1", "test-token", logger)
+
+	err := client.ReplyToThread(context.Background(), "channel-123", "post-456", "Test message")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mattermost reply to thread")
+}
+
+func TestToWireAttachment_ButtonWithStyle(t *testing.T) {
+	attachment := post.Attachment{
+		Color: "#808080",
+		Title: "Test Alert",
+		Actions: []post.Button{
+			{
+				ID:    "processing",
+				Name:  "Processing...",
+				Style: "success",
+				Integration: post.ButtonIntegration{
+					URL:     "",
+					Context: nil,
+				},
+			},
+		},
+	}
+
+	wire := toWireAttachment(attachment)
+
+	require.Len(t, wire.Actions, 1)
+	assert.Equal(t, "button", wire.Actions[0].Type)
+	assert.Equal(t, "processing", wire.Actions[0].ID)
+	assert.Equal(t, "Processing...", wire.Actions[0].Name)
+	assert.Equal(t, "success", wire.Actions[0].Style)
+}

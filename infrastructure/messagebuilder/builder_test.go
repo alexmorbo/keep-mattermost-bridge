@@ -489,3 +489,130 @@ func TestDifferentSeveritiesProduceDifferentColorsAndEmojis(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildLoadingAttachment(t *testing.T) {
+	fileConfig := &config.FileConfig{
+		Message: config.MessageConfig{
+			Colors: map[string]string{},
+			Emoji:  map[string]string{},
+			Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
+		},
+		Labels: config.LabelsConfig{},
+	}
+
+	builder := NewBuilder(fileConfig)
+
+	tests := []struct {
+		name          string
+		action        string
+		alertName     string
+		fingerprint   string
+		expectedStyle string
+	}{
+		{
+			name:          "acknowledge action uses default style",
+			action:        "acknowledge",
+			alertName:     "CPU Alert",
+			fingerprint:   "fp-123",
+			expectedStyle: "default",
+		},
+		{
+			name:          "resolve action uses success style",
+			action:        "resolve",
+			alertName:     "Memory Alert",
+			fingerprint:   "fp-456",
+			expectedStyle: "success",
+		},
+		{
+			name:          "unacknowledge action uses default style",
+			action:        "unacknowledge",
+			alertName:     "Disk Alert",
+			fingerprint:   "fp-789",
+			expectedStyle: "default",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attachment := builder.BuildLoadingAttachment(tt.action, tt.alertName, tt.fingerprint, "http://keep.ui")
+
+			assert.Equal(t, "#808080", attachment.Color, "loading attachment should have gray color")
+			assert.Equal(t, tt.alertName, attachment.Title)
+			assert.Contains(t, attachment.TitleLink, tt.fingerprint)
+			assert.Len(t, attachment.Actions, 1, "should have exactly one button")
+			assert.Equal(t, "processing", attachment.Actions[0].ID)
+			assert.Equal(t, "Processing...", attachment.Actions[0].Name)
+			assert.Equal(t, tt.expectedStyle, attachment.Actions[0].Style)
+		})
+	}
+}
+
+func TestBuildFiringAttachmentHasButtonStyles(t *testing.T) {
+	fileConfig := &config.FileConfig{
+		Message: config.MessageConfig{
+			Colors: map[string]string{"high": "#FF6600"},
+			Emoji:  map[string]string{"high": "🟠"},
+		},
+		Labels: config.LabelsConfig{},
+	}
+
+	builder := NewBuilder(fileConfig)
+
+	severity, _ := alert.NewSeverity("high")
+	fingerprint := alert.RestoreFingerprint("test-fp")
+	status := alert.RestoreStatus(alert.StatusFiring)
+
+	testAlert := alert.RestoreAlert(
+		fingerprint,
+		"Test Alert",
+		severity,
+		status,
+		"",
+		"prometheus",
+		map[string]string{},
+		time.Time{},
+	)
+
+	attachment := builder.BuildFiringAttachment(testAlert, "http://callback.url", "http://keep.ui")
+
+	require.Len(t, attachment.Actions, 2)
+	assert.Equal(t, "acknowledge", attachment.Actions[0].ID)
+	assert.Equal(t, "default", attachment.Actions[0].Style, "acknowledge button should have default style")
+	assert.Equal(t, "resolve", attachment.Actions[1].ID)
+	assert.Equal(t, "success", attachment.Actions[1].Style, "resolve button should have success style")
+}
+
+func TestBuildAcknowledgedAttachmentHasButtonStyles(t *testing.T) {
+	fileConfig := &config.FileConfig{
+		Message: config.MessageConfig{
+			Colors: map[string]string{"acknowledged": "#FFA500"},
+			Emoji:  map[string]string{},
+		},
+		Labels: config.LabelsConfig{},
+	}
+
+	builder := NewBuilder(fileConfig)
+
+	severity, _ := alert.NewSeverity("high")
+	fingerprint := alert.RestoreFingerprint("test-fp")
+	status := alert.RestoreStatus(alert.StatusAcknowledged)
+
+	testAlert := alert.RestoreAlert(
+		fingerprint,
+		"Test Alert",
+		severity,
+		status,
+		"",
+		"prometheus",
+		map[string]string{},
+		time.Time{},
+	)
+
+	attachment := builder.BuildAcknowledgedAttachment(testAlert, "http://callback.url", "http://keep.ui", "testuser")
+
+	require.Len(t, attachment.Actions, 2)
+	assert.Equal(t, "unacknowledge", attachment.Actions[0].ID)
+	assert.Equal(t, "default", attachment.Actions[0].Style, "unacknowledge button should have default style")
+	assert.Equal(t, "resolve", attachment.Actions[1].ID)
+	assert.Equal(t, "success", attachment.Actions[1].Style, "resolve button should have success style")
+}

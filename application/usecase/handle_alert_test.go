@@ -97,6 +97,10 @@ func (m *mockMattermostClient) GetUser(ctx context.Context, userID string) (stri
 	return "testuser", nil
 }
 
+func (m *mockMattermostClient) ReplyToThread(ctx context.Context, channelID, rootID, message string) error {
+	return nil
+}
+
 type mockMessageBuilder struct{}
 
 func (m *mockMessageBuilder) BuildFiringAttachment(a *alert.Alert, callbackURL, keepUIURL string) post.Attachment {
@@ -117,6 +121,21 @@ func (m *mockMessageBuilder) BuildResolvedAttachment(a *alert.Alert, keepUIURL s
 	return post.Attachment{
 		Color: "#00CC00",
 		Title: "RESOLVED: " + a.Name(),
+	}
+}
+
+func (m *mockMessageBuilder) BuildLoadingAttachment(action, alertName, fingerprint, keepUIURL string) post.Attachment {
+	return post.Attachment{
+		Color: "#808080",
+		Title: alertName,
+	}
+}
+
+func (m *mockMessageBuilder) BuildErrorAttachment(alertName, fingerprint, keepUIURL, errorMsg string) post.Attachment {
+	return post.Attachment{
+		Color: "#FF0000",
+		Title: alertName,
+		Text:  "Error: " + errorMsg,
 	}
 }
 

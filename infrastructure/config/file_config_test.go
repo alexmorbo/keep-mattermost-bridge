@@ -642,10 +642,10 @@ func TestGetKeepUsername(t *testing.T) {
 		cfg := &FileConfig{
 			Users: UsersConfig{
 				Mapping: map[string]string{
-					"user.name":    "keep.user",
-					"user-name":    "keep-user",
-					"user_name":    "keep_user",
-					"user@domain":  "keepuser",
+					"user.name":   "keep.user",
+					"user-name":   "keep-user",
+					"user_name":   "keep_user",
+					"user@domain": "keepuser",
 				},
 			},
 		}

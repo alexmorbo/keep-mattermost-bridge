@@ -27,6 +27,7 @@ type AttachmentFieldDTO struct {
 type ButtonDTO struct {
 	ID          string
 	Name        string
+	Style       string
 	Integration ButtonIntegrationDTO
 }
 
@@ -44,8 +45,9 @@ func NewAttachmentDTO(a post.Attachment) AttachmentDTO {
 	buttons := make([]ButtonDTO, len(a.Actions))
 	for i, b := range a.Actions {
 		buttons[i] = ButtonDTO{
-			ID:   b.ID,
-			Name: b.Name,
+			ID:    b.ID,
+			Name:  b.Name,
+			Style: b.Style,
 			Integration: ButtonIntegrationDTO{
 				URL:     b.Integration.URL,
 				Context: b.Integration.Context,

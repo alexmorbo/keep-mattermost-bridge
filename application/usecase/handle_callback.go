@@ -15,6 +15,18 @@ import (
 	"github.com/alexmorbo/keep-mattermost-bridge/pkg/logger"
 )
 
+const (
+	ActionAcknowledge   = "acknowledge"
+	ActionResolve       = "resolve"
+	ActionUnacknowledge = "unacknowledge"
+)
+
+const (
+	ButtonStyleDefault = "default"
+	ButtonStyleSuccess = "success"
+	ButtonStyleDanger  = "danger"
+)
+
 type HandleCallbackUseCase struct {
 	postRepo    post.Repository
 	keepClient  port.KeepClient
@@ -49,76 +61,138 @@ func NewHandleCallbackUseCase(
 	}
 }
 
-func (uc *HandleCallbackUseCase) Execute(ctx context.Context, input dto.MattermostCallbackInput) (*dto.CallbackOutput, error) {
+func (uc *HandleCallbackUseCase) ExecuteImmediate(input dto.MattermostCallbackInput) (*dto.CallbackOutput, error) {
 	action := input.Context["action"]
 	fingerprintStr := input.Context["fingerprint"]
+	alertName := input.Context["alert_name"]
 
-	uc.logger.Info("Callback received",
+	uc.logger.Info("Callback received (immediate phase)",
 		logger.ApplicationFields("callback_received",
 			slog.String("action", action),
 			slog.String("fingerprint", fingerprintStr),
 			slog.String("user_id", input.UserID),
+			slog.String("post_id", input.PostID),
 		),
 	)
 
-	validActions := map[string]bool{"acknowledge": true, "resolve": true, "unacknowledge": true}
+	validActions := map[string]bool{
+		ActionAcknowledge:   true,
+		ActionResolve:       true,
+		ActionUnacknowledge: true,
+	}
 	metricAction := "unknown"
 	if validActions[action] {
 		metricAction = action
 	}
 	callbacksReceivedCounter(metricAction).Inc()
 
-	fingerprint, err := alert.NewFingerprint(fingerprintStr)
-	if err != nil {
+	if _, err := alert.NewFingerprint(fingerprintStr); err != nil {
 		return nil, fmt.Errorf("parse fingerprint: %w", err)
 	}
 
-	keepAlert, err := uc.keepClient.GetAlert(ctx, fingerprintStr)
-	if err != nil {
-		return nil, fmt.Errorf("get alert from keep: %w", err)
+	if alertName == "" {
+		return nil, fmt.Errorf("missing required context field: alert_name")
 	}
 
-	severity, err := alert.NewSeverity(keepAlert.Severity)
-	if err != nil {
-		return nil, fmt.Errorf("parse severity: %w", err)
-	}
+	loadingAttachment := uc.msgBuilder.BuildLoadingAttachment(action, alertName, fingerprintStr, uc.keepUIURL)
 
-	username, err := uc.mmClient.GetUser(ctx, input.UserID)
-	if err != nil {
-		uc.logger.Warn("Failed to get username, using user_id",
-			slog.String("user_id", input.UserID),
+	return &dto.CallbackOutput{
+		Attachment: dto.NewAttachmentDTO(loadingAttachment),
+	}, nil
+}
+
+func (uc *HandleCallbackUseCase) ExecuteAsync(input dto.MattermostCallbackInput) {
+	action := input.Context["action"]
+	fingerprintStr := input.Context["fingerprint"]
+	alertName := input.Context["alert_name"]
+
+	uc.wg.Add(1)
+	go func() {
+		defer uc.wg.Done()
+
+		asyncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		fingerprint, err := alert.NewFingerprint(fingerprintStr)
+		if err != nil {
+			uc.logger.Error("Failed to parse fingerprint in async phase",
+				slog.String("fingerprint", fingerprintStr),
+				slog.String("error", err.Error()),
+			)
+			uc.updatePostWithError(asyncCtx, input.PostID, alertName, fingerprintStr, "Invalid fingerprint")
+			return
+		}
+
+		keepAlert, err := uc.keepClient.GetAlert(asyncCtx, fingerprintStr)
+		if err != nil {
+			uc.logger.Error("Failed to get alert from keep in async phase",
+				slog.String("fingerprint", fingerprintStr),
+				slog.String("error", err.Error()),
+			)
+			uc.updatePostWithError(asyncCtx, input.PostID, alertName, fingerprintStr, "Failed to get alert data")
+			return
+		}
+
+		severity, err := alert.NewSeverity(keepAlert.Severity)
+		if err != nil {
+			uc.logger.Error("Failed to parse severity in async phase",
+				slog.String("severity", keepAlert.Severity),
+				slog.String("error", err.Error()),
+			)
+			uc.updatePostWithError(asyncCtx, input.PostID, alertName, fingerprintStr, "Invalid severity")
+			return
+		}
+
+		username, err := uc.mmClient.GetUser(asyncCtx, input.UserID)
+		if err != nil {
+			uc.logger.Warn("Failed to get username, using user_id",
+				slog.String("user_id", input.UserID),
+				slog.String("error", err.Error()),
+			)
+			username = input.UserID
+		}
+
+		statusStr := action
+		if action == ActionAcknowledge {
+			statusStr = alert.StatusAcknowledged
+		}
+
+		source := strings.Join(keepAlert.Source, ", ")
+
+		a := alert.RestoreAlert(
+			fingerprint,
+			keepAlert.Name,
+			severity,
+			alert.RestoreStatus(statusStr),
+			keepAlert.Description,
+			source,
+			keepAlert.Labels,
+			keepAlert.FiringStartTime,
+		)
+
+		switch action {
+		case ActionAcknowledge:
+			uc.handleAcknowledgeAsync(asyncCtx, a, fingerprint, username, input.PostID, input.ChannelID)
+		case ActionResolve:
+			uc.handleResolveAsync(asyncCtx, a, fingerprint, username, input.PostID, input.ChannelID)
+		case ActionUnacknowledge:
+			uc.handleUnacknowledgeAsync(asyncCtx, a, fingerprint, username, input.PostID, input.ChannelID)
+		default:
+			uc.logger.Error("Unknown action in async phase",
+				slog.String("action", action),
+			)
+			uc.updatePostWithError(asyncCtx, input.PostID, alertName, fingerprintStr, "Unknown action")
+		}
+	}()
+}
+
+func (uc *HandleCallbackUseCase) updatePostWithError(ctx context.Context, postID, alertName, fingerprint, errorMsg string) {
+	attachment := uc.msgBuilder.BuildErrorAttachment(alertName, fingerprint, uc.keepUIURL, errorMsg)
+	if err := uc.mmClient.UpdatePost(ctx, postID, attachment); err != nil {
+		uc.logger.Error("Failed to update post with error state",
+			slog.String("post_id", postID),
 			slog.String("error", err.Error()),
 		)
-		username = input.UserID
-	}
-
-	statusStr := action
-	if action == "acknowledge" {
-		statusStr = alert.StatusAcknowledged
-	}
-
-	source := strings.Join(keepAlert.Source, ", ")
-
-	a := alert.RestoreAlert(
-		fingerprint,
-		keepAlert.Name,
-		severity,
-		alert.RestoreStatus(statusStr),
-		keepAlert.Description,
-		source,
-		keepAlert.Labels,
-		keepAlert.FiringStartTime,
-	)
-
-	switch action {
-	case "acknowledge":
-		return uc.handleAcknowledge(ctx, a, fingerprint, username)
-	case "resolve":
-		return uc.handleResolve(ctx, a, fingerprint, username)
-	case "unacknowledge":
-		return uc.handleUnacknowledge(ctx, a, fingerprint, username)
-	default:
-		return nil, fmt.Errorf("unknown action: %s", action)
 	}
 }
 
@@ -134,110 +208,120 @@ func (uc *HandleCallbackUseCase) buildEnrichments(status, mattermostUsername str
 	return enrichments
 }
 
-func (uc *HandleCallbackUseCase) handleAcknowledge(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username string) (*dto.CallbackOutput, error) {
-	_ = ctx // ctx not needed for acknowledge, but kept for API consistency with handleResolve
-
+func (uc *HandleCallbackUseCase) handleAcknowledgeAsync(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username, postID, channelID string) {
 	enrichments := uc.buildEnrichments("acknowledged", username)
 
-	uc.wg.Add(1)
-	go func() {
-		defer uc.wg.Done()
-		enrichCtx, enrichCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer enrichCancel()
-		if err := uc.keepClient.EnrichAlert(enrichCtx, fingerprint.Value(), enrichments); err != nil {
-			uc.logger.Error("Failed to enrich alert in Keep",
-				slog.String("fingerprint", fingerprint.Value()),
-				slog.String("error", err.Error()),
-			)
-		}
-	}()
+	if err := uc.keepClient.EnrichAlert(ctx, fingerprint.Value(), enrichments); err != nil {
+		uc.logger.Error("Failed to enrich alert in Keep",
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("error", err.Error()),
+		)
+	}
 
 	attachment := uc.msgBuilder.BuildAcknowledgedAttachment(a, uc.callbackURL, uc.keepUIURL, username)
 
-	uc.logger.Info("Callback processed",
-		logger.ApplicationFields("callback_processed",
+	if err := uc.mmClient.UpdatePost(ctx, postID, attachment); err != nil {
+		uc.logger.Error("Failed to update post",
+			slog.String("post_id", postID),
+			slog.String("error", err.Error()),
+		)
+	}
+
+	replyMsg := fmt.Sprintf("Acknowledged by @%s", username)
+	if err := uc.mmClient.ReplyToThread(ctx, channelID, postID, replyMsg); err != nil {
+		uc.logger.Error("Failed to reply to thread",
+			slog.String("post_id", postID),
+			slog.String("error", err.Error()),
+		)
+	}
+
+	uc.logger.Info("Callback processed (async)",
+		logger.ApplicationFields("callback_processed_async",
 			slog.String("action", "acknowledge"),
 			slog.String("fingerprint", fingerprint.Value()),
 			slog.String("username", username),
 		),
 	)
 	alertAckCounter.Inc()
-
-	return &dto.CallbackOutput{
-		Attachment: dto.NewAttachmentDTO(attachment),
-		Ephemeral:  fmt.Sprintf("Alert acknowledged by @%s", username),
-	}, nil
 }
 
-func (uc *HandleCallbackUseCase) handleResolve(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username string) (*dto.CallbackOutput, error) {
+func (uc *HandleCallbackUseCase) handleResolveAsync(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username, postID, channelID string) {
 	enrichments := uc.buildEnrichments("resolved", username)
 
-	uc.wg.Add(1)
-	go func() {
-		defer uc.wg.Done()
-		enrichCtx, enrichCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer enrichCancel()
-		if err := uc.keepClient.EnrichAlert(enrichCtx, fingerprint.Value(), enrichments); err != nil {
-			uc.logger.Error("Failed to enrich alert in Keep",
-				slog.String("fingerprint", fingerprint.Value()),
-				slog.String("error", err.Error()),
-			)
-		}
-	}()
+	if err := uc.keepClient.EnrichAlert(ctx, fingerprint.Value(), enrichments); err != nil {
+		uc.logger.Error("Failed to enrich alert in Keep",
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("error", err.Error()),
+		)
+	}
 
 	attachment := uc.msgBuilder.BuildResolvedAttachment(a, uc.keepUIURL)
 
-	if err := uc.postRepo.Delete(ctx, fingerprint); err != nil {
-		return nil, fmt.Errorf("delete post from store: %w", err)
+	if err := uc.mmClient.UpdatePost(ctx, postID, attachment); err != nil {
+		uc.logger.Error("Failed to update post",
+			slog.String("post_id", postID),
+			slog.String("error", err.Error()),
+		)
 	}
 
-	uc.logger.Info("Callback processed",
-		logger.ApplicationFields("callback_processed",
+	replyMsg := fmt.Sprintf("Resolved by @%s", username)
+	if err := uc.mmClient.ReplyToThread(ctx, channelID, postID, replyMsg); err != nil {
+		uc.logger.Error("Failed to reply to thread",
+			slog.String("post_id", postID),
+			slog.String("error", err.Error()),
+		)
+	}
+
+	if err := uc.postRepo.Delete(ctx, fingerprint); err != nil {
+		uc.logger.Error("Failed to delete post from store",
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("error", err.Error()),
+		)
+	}
+
+	uc.logger.Info("Callback processed (async)",
+		logger.ApplicationFields("callback_processed_async",
 			slog.String("action", "resolve"),
 			slog.String("fingerprint", fingerprint.Value()),
 			slog.String("username", username),
 		),
 	)
 	alertResolveCounter.Inc()
-
-	return &dto.CallbackOutput{
-		Attachment: dto.NewAttachmentDTO(attachment),
-		Ephemeral:  fmt.Sprintf("Alert resolved by @%s", username),
-	}, nil
 }
 
-// handleUnacknowledge removes all enrichments from the alert, including status and assignee.
-// This resets the alert to its original firing state without any user assignment.
-func (uc *HandleCallbackUseCase) handleUnacknowledge(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username string) (*dto.CallbackOutput, error) {
-	_ = ctx
-	uc.wg.Add(1)
-	go func() {
-		defer uc.wg.Done()
-		unenrichCtx, unenrichCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer unenrichCancel()
-		if err := uc.keepClient.UnenrichAlert(unenrichCtx, fingerprint.Value()); err != nil {
-			uc.logger.Error("Failed to unenrich alert in Keep",
-				slog.String("fingerprint", fingerprint.Value()),
-				slog.String("error", err.Error()),
-			)
-		}
-	}()
+func (uc *HandleCallbackUseCase) handleUnacknowledgeAsync(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, username, postID, channelID string) {
+	if err := uc.keepClient.UnenrichAlert(ctx, fingerprint.Value()); err != nil {
+		uc.logger.Error("Failed to unenrich alert in Keep",
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("error", err.Error()),
+		)
+	}
 
 	attachment := uc.msgBuilder.BuildFiringAttachment(a, uc.callbackURL, uc.keepUIURL)
 
-	uc.logger.Info("Callback processed",
-		logger.ApplicationFields("callback_processed",
+	if err := uc.mmClient.UpdatePost(ctx, postID, attachment); err != nil {
+		uc.logger.Error("Failed to update post",
+			slog.String("post_id", postID),
+			slog.String("error", err.Error()),
+		)
+	}
+
+	replyMsg := fmt.Sprintf("Unacknowledged by @%s", username)
+	if err := uc.mmClient.ReplyToThread(ctx, channelID, postID, replyMsg); err != nil {
+		uc.logger.Error("Failed to reply to thread",
+			slog.String("post_id", postID),
+			slog.String("error", err.Error()),
+		)
+	}
+
+	uc.logger.Info("Callback processed (async)",
+		logger.ApplicationFields("callback_processed_async",
 			slog.String("action", "unacknowledge"),
 			slog.String("fingerprint", fingerprint.Value()),
 			slog.String("username", username),
 		),
 	)
 	alertUnackCounter.Inc()
-
-	return &dto.CallbackOutput{
-		Attachment: dto.NewAttachmentDTO(attachment),
-		Ephemeral:  fmt.Sprintf("Alert unacknowledged by @%s", username),
-	}, nil
 }
 
 func (uc *HandleCallbackUseCase) Wait() {
