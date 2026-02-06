@@ -7,14 +7,15 @@ import (
 )
 
 type Post struct {
-	postID          string
-	channelID       string
-	fingerprint     alert.Fingerprint
-	alertName       string
-	severity        alert.Severity
-	firingStartTime time.Time
-	createdAt       time.Time
-	lastUpdated     time.Time
+	postID            string
+	channelID         string
+	fingerprint       alert.Fingerprint
+	alertName         string
+	severity          alert.Severity
+	firingStartTime   time.Time
+	createdAt         time.Time
+	lastUpdated       time.Time
+	lastKnownAssignee string
 }
 
 func NewPost(postID, channelID string, fingerprint alert.Fingerprint, alertName string, severity alert.Severity, firingStartTime time.Time) *Post {
@@ -31,16 +32,17 @@ func NewPost(postID, channelID string, fingerprint alert.Fingerprint, alertName 
 	}
 }
 
-func RestorePost(postID, channelID string, fingerprint alert.Fingerprint, alertName string, severity alert.Severity, firingStartTime, createdAt, lastUpdated time.Time) *Post {
+func RestorePost(postID, channelID string, fingerprint alert.Fingerprint, alertName string, severity alert.Severity, firingStartTime, createdAt, lastUpdated time.Time, lastKnownAssignee string) *Post {
 	return &Post{
-		postID:          postID,
-		channelID:       channelID,
-		fingerprint:     fingerprint,
-		alertName:       alertName,
-		severity:        severity,
-		firingStartTime: firingStartTime,
-		createdAt:       createdAt,
-		lastUpdated:     lastUpdated,
+		postID:            postID,
+		channelID:         channelID,
+		fingerprint:       fingerprint,
+		alertName:         alertName,
+		severity:          severity,
+		firingStartTime:   firingStartTime,
+		createdAt:         createdAt,
+		lastUpdated:       lastUpdated,
+		lastKnownAssignee: lastKnownAssignee,
 	}
 }
 
@@ -52,7 +54,12 @@ func (p *Post) Severity() alert.Severity       { return p.severity }
 func (p *Post) FiringStartTime() time.Time     { return p.firingStartTime }
 func (p *Post) CreatedAt() time.Time           { return p.createdAt }
 func (p *Post) LastUpdated() time.Time         { return p.lastUpdated }
+func (p *Post) LastKnownAssignee() string      { return p.lastKnownAssignee }
 
 func (p *Post) Touch() {
 	p.lastUpdated = time.Now()
+}
+
+func (p *Post) SetLastKnownAssignee(assignee string) {
+	p.lastKnownAssignee = assignee
 }

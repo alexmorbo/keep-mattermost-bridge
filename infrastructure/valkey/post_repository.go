@@ -33,17 +33,22 @@ var (
 
 	redisDelOK  = metrics.NewCounter(`redis_operations_total{operation="del",status="ok"}`)
 	redisDelErr = metrics.NewCounter(`redis_operations_total{operation="del",status="error"}`)
+
+	redisScanOK  = metrics.NewCounter(`redis_operations_total{operation="scan",status="ok"}`)
+	redisScanErr = metrics.NewCounter(`redis_operations_total{operation="scan",status="error"}`)
+	redisScanDur = metrics.NewHistogram(`redis_operation_duration_seconds{operation="scan"}`)
 )
 
 type postData struct {
-	PostID          string    `json:"post_id"`
-	ChannelID       string    `json:"channel_id"`
-	Fingerprint     string    `json:"fingerprint"`
-	AlertName       string    `json:"alert_name"`
-	Severity        string    `json:"severity"`
-	FiringStartTime time.Time `json:"firing_start_time"`
-	CreatedAt       time.Time `json:"created_at"`
-	LastUpdated     time.Time `json:"last_updated"`
+	PostID            string    `json:"post_id"`
+	ChannelID         string    `json:"channel_id"`
+	Fingerprint       string    `json:"fingerprint"`
+	AlertName         string    `json:"alert_name"`
+	Severity          string    `json:"severity"`
+	FiringStartTime   time.Time `json:"firing_start_time"`
+	CreatedAt         time.Time `json:"created_at"`
+	LastUpdated       time.Time `json:"last_updated"`
+	LastKnownAssignee string    `json:"last_known_assignee,omitempty"`
 }
 
 type PostRepository struct {
@@ -63,14 +68,15 @@ func (r *PostRepository) Save(ctx context.Context, fingerprint alert.Fingerprint
 	start := time.Now()
 
 	data := postData{
-		PostID:          p.PostID(),
-		ChannelID:       p.ChannelID(),
-		Fingerprint:     p.Fingerprint().Value(),
-		AlertName:       p.AlertName(),
-		Severity:        p.Severity().String(),
-		FiringStartTime: p.FiringStartTime(),
-		CreatedAt:       p.CreatedAt(),
-		LastUpdated:     p.LastUpdated(),
+		PostID:            p.PostID(),
+		ChannelID:         p.ChannelID(),
+		Fingerprint:       p.Fingerprint().Value(),
+		AlertName:         p.AlertName(),
+		Severity:          p.Severity().String(),
+		FiringStartTime:   p.FiringStartTime(),
+		CreatedAt:         p.CreatedAt(),
+		LastUpdated:       p.LastUpdated(),
+		LastKnownAssignee: p.LastKnownAssignee(),
 	}
 
 	jsonData, err := json.Marshal(data)
@@ -139,6 +145,7 @@ func (r *PostRepository) FindByFingerprint(ctx context.Context, fingerprint aler
 		data.FiringStartTime,
 		data.CreatedAt,
 		data.LastUpdated,
+		data.LastKnownAssignee,
 	), nil
 }
 
@@ -162,6 +169,101 @@ func (r *PostRepository) Delete(ctx context.Context, fingerprint alert.Fingerpri
 	redisDelOK.Inc()
 
 	return nil
+}
+
+func (r *PostRepository) FindAllActive(ctx context.Context) ([]*post.Post, error) {
+	start := time.Now()
+	pattern := keyPrefix + "*"
+
+	// First, collect all keys using SCAN
+	var allKeys []string
+	var cursor uint64
+
+	for {
+		keys, nextCursor, err := r.client.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			duration := time.Since(start).Milliseconds()
+			r.logger.Error("Redis SCAN failed",
+				logger.RedisFieldsWithError("scan", pattern, duration, err.Error()),
+			)
+			redisScanErr.Inc()
+			return nil, fmt.Errorf("redis scan: %w", err)
+		}
+
+		allKeys = append(allKeys, keys...)
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	if len(allKeys) == 0 {
+		duration := time.Since(start).Milliseconds()
+		r.logger.Debug("Redis SCAN completed (no keys)",
+			logger.RedisFields("scan", pattern, duration),
+		)
+		redisScanOK.Inc()
+		redisScanDur.Update(float64(duration) / 1000)
+		return nil, nil
+	}
+
+	// Batch fetch all values using MGET
+	results, err := r.client.MGet(ctx, allKeys...).Result()
+	if err != nil {
+		duration := time.Since(start).Milliseconds()
+		r.logger.Error("Redis MGET failed",
+			logger.RedisFieldsWithError("mget", pattern, duration, err.Error()),
+		)
+		redisScanErr.Inc()
+		return nil, fmt.Errorf("redis mget: %w", err)
+	}
+
+	posts := make([]*post.Post, 0, len(results))
+	for i, result := range results {
+		if result == nil {
+			continue
+		}
+
+		strResult, ok := result.(string)
+		if !ok {
+			r.logger.Warn("Unexpected result type during MGET",
+				slog.String("key", allKeys[i]),
+			)
+			continue
+		}
+
+		var data postData
+		if err := json.Unmarshal([]byte(strResult), &data); err != nil {
+			r.logger.Warn("Failed to unmarshal post data during scan",
+				slog.String("key", allKeys[i]),
+				slog.String("error", err.Error()),
+			)
+			continue
+		}
+
+		p := post.RestorePost(
+			data.PostID,
+			data.ChannelID,
+			alert.RestoreFingerprint(data.Fingerprint),
+			data.AlertName,
+			alert.RestoreSeverity(data.Severity),
+			data.FiringStartTime,
+			data.CreatedAt,
+			data.LastUpdated,
+			data.LastKnownAssignee,
+		)
+		posts = append(posts, p)
+	}
+
+	duration := time.Since(start).Milliseconds()
+	r.logger.Debug("Redis SCAN+MGET completed",
+		logger.RedisFields("scan", pattern, duration),
+		slog.Int("count", len(posts)),
+	)
+	redisScanOK.Inc()
+	redisScanDur.Update(float64(duration) / 1000)
+
+	return posts, nil
 }
 
 func (r *PostRepository) Ping(ctx context.Context) error {

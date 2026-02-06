@@ -162,6 +162,7 @@ func TestSavePreservesAllFields(t *testing.T) {
 		firingStartTime,
 		createdTime,
 		updatedTime,
+		"testassignee",
 	)
 
 	err := repo.Save(ctx, fingerprint, p)
@@ -177,6 +178,7 @@ func TestSavePreservesAllFields(t *testing.T) {
 	assert.Equal(t, "high", found.Severity().Value())
 	assert.WithinDuration(t, createdTime, found.CreatedAt(), time.Millisecond)
 	assert.WithinDuration(t, updatedTime, found.LastUpdated(), time.Millisecond)
+	assert.Equal(t, "testassignee", found.LastKnownAssignee())
 }
 
 func TestNewPostRepository(t *testing.T) {
@@ -247,4 +249,59 @@ func TestDeleteRedisDelError(t *testing.T) {
 	err := repo.Delete(ctx, fingerprint)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "redis del")
+}
+
+func TestFindAllActive(t *testing.T) {
+	repo, _ := setupTestRedis(t)
+	ctx := context.Background()
+
+	posts, err := repo.FindAllActive(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, posts)
+
+	fingerprint1 := alert.RestoreFingerprint("fp-active-1")
+	p1 := post.NewPost("post-1", "channel-1", fingerprint1, "Alert 1", alert.RestoreSeverity("critical"), time.Now())
+	err = repo.Save(ctx, fingerprint1, p1)
+	require.NoError(t, err)
+
+	fingerprint2 := alert.RestoreFingerprint("fp-active-2")
+	p2 := post.NewPost("post-2", "channel-2", fingerprint2, "Alert 2", alert.RestoreSeverity("high"), time.Now())
+	err = repo.Save(ctx, fingerprint2, p2)
+	require.NoError(t, err)
+
+	fingerprint3 := alert.RestoreFingerprint("fp-active-3")
+	p3 := post.NewPost("post-3", "channel-3", fingerprint3, "Alert 3", alert.RestoreSeverity("warning"), time.Now())
+	p3.SetLastKnownAssignee("testuser")
+	err = repo.Save(ctx, fingerprint3, p3)
+	require.NoError(t, err)
+
+	posts, err = repo.FindAllActive(ctx)
+	require.NoError(t, err)
+	assert.Len(t, posts, 3)
+
+	fingerprintSet := make(map[string]bool)
+	for _, p := range posts {
+		fingerprintSet[p.Fingerprint().Value()] = true
+	}
+	assert.True(t, fingerprintSet["fp-active-1"])
+	assert.True(t, fingerprintSet["fp-active-2"])
+	assert.True(t, fingerprintSet["fp-active-3"])
+
+	for _, p := range posts {
+		if p.Fingerprint().Value() == "fp-active-3" {
+			assert.Equal(t, "testuser", p.LastKnownAssignee())
+		}
+	}
+}
+
+func TestFindAllActiveRedisError(t *testing.T) {
+	repo, mr := setupTestRedis(t)
+	ctx := context.Background()
+
+	mr.Close()
+
+	posts, err := repo.FindAllActive(ctx)
+	require.Error(t, err)
+	assert.Nil(t, posts)
+	assert.Contains(t, err.Error(), "redis scan")
 }

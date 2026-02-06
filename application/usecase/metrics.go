@@ -1,6 +1,10 @@
 package usecase
 
-import "github.com/VictoriaMetrics/metrics"
+import (
+	"strconv"
+
+	"github.com/VictoriaMetrics/metrics"
+)
 
 var (
 	alertReFireCounter      = metrics.NewCounter(`alerts_updated_total{action="re-fire"}`)
@@ -23,9 +27,17 @@ var (
 
 	// Retry metrics for assignee fetching
 	assigneeRetryAttempts = func(attempt int) *metrics.Counter {
-		return metrics.GetOrCreateCounter(`assignee_retry_attempts_total{attempt="` + string(rune('0'+attempt)) + `"}`)
+		return metrics.GetOrCreateCounter(`assignee_retry_attempts_total{attempt="` + strconv.Itoa(attempt) + `"}`)
 	}
 	assigneeRetrySuccess   = metrics.NewCounter(`assignee_retry_result_total{result="success"}`)
 	assigneeRetryExhausted = metrics.NewCounter(`assignee_retry_result_total{result="exhausted"}`)
 	assigneeRetryError     = metrics.NewCounter(`assignee_retry_result_total{result="error"}`)
+
+	// Polling metrics
+	pollExecutionsCounter      = metrics.NewCounter(`poll_executions_total`)
+	pollAlertsCheckedCounter   = metrics.NewCounter(`poll_alerts_checked_total`)
+	pollAssigneeChangedCounter = metrics.NewCounter(`poll_assignee_changes_detected_total`)
+	pollErrorsCounter          = metrics.NewCounter(`poll_errors_total`)
+	pollActivePostsGauge       = metrics.NewGauge(`poll_active_posts_count`, nil)
+	pollDurationSeconds        = metrics.NewHistogram(`poll_duration_seconds`)
 )

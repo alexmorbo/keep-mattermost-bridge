@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 type Config struct {
@@ -11,8 +12,17 @@ type Config struct {
 	Mattermost  MattermostConfig
 	Keep        KeepConfig
 	Redis       RedisConfig
+	Polling     PollingConfig
 	ConfigPath  string
 	CallbackURL string
+}
+
+// PollingConfig configures background polling for detecting assignee changes
+// made directly in Keep UI, which bypass webhook notifications.
+type PollingConfig struct {
+	Enabled     bool          // Enable background polling
+	Interval    time.Duration // Interval between polling cycles (minimum 10s)
+	AlertsLimit int           // Maximum alerts to fetch from Keep API per poll (default 1000)
 }
 
 type ServerConfig struct {
@@ -52,6 +62,21 @@ func LoadFromEnv() (*Config, error) {
 		return nil, err
 	}
 
+	pollingEnabled, err := getEnvOrDefaultBool("POLLING_ENABLED", false)
+	if err != nil {
+		return nil, err
+	}
+
+	pollingInterval, err := getEnvOrDefaultDuration("POLLING_INTERVAL", time.Minute)
+	if err != nil {
+		return nil, err
+	}
+
+	pollingAlertsLimit, err := getEnvOrDefaultInt("POLLING_ALERTS_LIMIT", 1000)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		Server: ServerConfig{
 			Port:     serverPort,
@@ -70,6 +95,11 @@ func LoadFromEnv() (*Config, error) {
 			Addr:     getEnvOrDefault("REDIS_ADDR", "localhost:6379"),
 			Password: os.Getenv("REDIS_PASSWORD"),
 			DB:       redisDB,
+		},
+		Polling: PollingConfig{
+			Enabled:     pollingEnabled,
+			Interval:    pollingInterval,
+			AlertsLimit: pollingAlertsLimit,
 		},
 		ConfigPath:  getEnvOrDefault("CONFIG_PATH", "/etc/kmbridge/config.yaml"),
 		CallbackURL: os.Getenv("CALLBACK_URL"),
@@ -104,6 +134,14 @@ func (c *Config) validate() error {
 	if c.CallbackURL == "" {
 		return fmt.Errorf("CALLBACK_URL is required")
 	}
+	if c.Polling.Enabled {
+		if c.Polling.Interval < 10*time.Second {
+			return fmt.Errorf("POLLING_INTERVAL must be at least 10s when polling is enabled, got %s", c.Polling.Interval)
+		}
+		if c.Polling.AlertsLimit < 1 {
+			return fmt.Errorf("POLLING_ALERTS_LIMIT must be at least 1, got %d", c.Polling.AlertsLimit)
+		}
+	}
 	return nil
 }
 
@@ -124,4 +162,28 @@ func getEnvOrDefaultInt(key string, defaultValue int) (int, error) {
 		return 0, fmt.Errorf("parse %s=%q: %w", key, v, err)
 	}
 	return i, nil
+}
+
+func getEnvOrDefaultBool(key string, defaultValue bool) (bool, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultValue, nil
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return false, fmt.Errorf("parse %s=%q: %w", key, v, err)
+	}
+	return b, nil
+}
+
+func getEnvOrDefaultDuration(key string, defaultValue time.Duration) (time.Duration, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultValue, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s=%q: %w", key, v, err)
+	}
+	return d, nil
 }

@@ -61,6 +61,14 @@ func (m *mockPostRepository) Delete(ctx context.Context, fingerprint alert.Finge
 	return nil
 }
 
+func (m *mockPostRepository) FindAllActive(ctx context.Context) ([]*post.Post, error) {
+	result := make([]*post.Post, 0, len(m.posts))
+	for _, p := range m.posts {
+		result = append(result, p)
+	}
+	return result, nil
+}
+
 type mockMattermostClient struct {
 	createPostErr       error
 	updatePostErr       error
@@ -164,6 +172,10 @@ func (m *mockKeepClientForAlert) GetWorkflows(ctx context.Context) ([]port.KeepW
 
 func (m *mockKeepClientForAlert) CreateWorkflow(ctx context.Context, config port.WorkflowConfig) error {
 	return nil
+}
+
+func (m *mockKeepClientForAlert) GetAlerts(ctx context.Context, limit int) ([]port.KeepAlert, error) {
+	return nil, nil
 }
 
 type mockMessageBuilder struct {

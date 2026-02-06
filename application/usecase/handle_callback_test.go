@@ -169,6 +169,10 @@ func (m *mockKeepClient) CreateWorkflow(ctx context.Context, config port.Workflo
 	return m.createWorkflowErr
 }
 
+func (m *mockKeepClient) GetAlerts(ctx context.Context, limit int) ([]port.KeepAlert, error) {
+	return nil, nil
+}
+
 type mockUserMapper struct {
 	mapping map[string]string
 }

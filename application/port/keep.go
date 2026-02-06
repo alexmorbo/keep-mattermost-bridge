@@ -53,6 +53,7 @@ type KeepClient interface {
 	EnrichAlert(ctx context.Context, fingerprint string, enrichments map[string]string, opts EnrichOptions) error
 	UnenrichAlert(ctx context.Context, fingerprint string, enrichments []string) error
 	GetAlert(ctx context.Context, fingerprint string) (*KeepAlert, error)
+	GetAlerts(ctx context.Context, limit int) ([]KeepAlert, error)
 	GetProviders(ctx context.Context) ([]KeepProvider, error)
 	CreateWebhookProvider(ctx context.Context, config WebhookProviderConfig) error
 	GetWorkflows(ctx context.Context) ([]KeepWorkflow, error)

@@ -25,6 +25,8 @@ var (
 	keepUnenrichErr       = metrics.NewCounter(`keep_api_calls_total{operation="unenrich",status="error"}`)
 	keepGetAlertOK        = metrics.NewCounter(`keep_api_calls_total{operation="get_alert",status="ok"}`)
 	keepGetAlertErr       = metrics.NewCounter(`keep_api_calls_total{operation="get_alert",status="error"}`)
+	keepGetAlertsOK       = metrics.NewCounter(`keep_api_calls_total{operation="get_alerts",status="ok"}`)
+	keepGetAlertsErr      = metrics.NewCounter(`keep_api_calls_total{operation="get_alerts",status="error"}`)
 	keepGetProvidersOK    = metrics.NewCounter(`keep_api_calls_total{operation="get_providers",status="ok"}`)
 	keepGetProvidersErr   = metrics.NewCounter(`keep_api_calls_total{operation="get_providers",status="error"}`)
 	keepCreateProviderOK  = metrics.NewCounter(`keep_api_calls_total{operation="create_provider",status="ok"}`)
@@ -200,6 +202,59 @@ type alertResponse struct {
 	Assignee string `json:"assignee"`
 }
 
+func (c *Client) parseAlertResponse(alertResp alertResponse) port.KeepAlert {
+	labels := make(map[string]string, len(alertResp.Labels))
+	for k, v := range alertResp.Labels {
+		if s, ok := v.(string); ok {
+			labels[k] = s
+		} else {
+			labels[k] = fmt.Sprintf("%v", v)
+		}
+	}
+
+	var firingStartTime time.Time
+	if alertResp.FiringStartTime != "" {
+		var parseErr error
+		firingStartTime, parseErr = time.Parse(time.RFC3339, alertResp.FiringStartTime)
+		if parseErr != nil {
+			c.logger.Debug("Failed to parse firingStartTime from Keep API",
+				slog.String("value", alertResp.FiringStartTime),
+				slog.String("error", parseErr.Error()),
+			)
+		}
+	}
+
+	source := alertResp.Source
+	if source == nil {
+		source = []string{}
+	}
+
+	enrichments := make(map[string]string)
+	for k, v := range alertResp.Enrichments {
+		if str, ok := v.(string); ok {
+			enrichments[k] = str
+		} else if v != nil {
+			enrichments[k] = fmt.Sprintf("%v", v)
+		}
+	}
+	// Keep API returns assignee as top-level field, add it to enrichments for consistency
+	if alertResp.Assignee != "" {
+		enrichments["assignee"] = alertResp.Assignee
+	}
+
+	return port.KeepAlert{
+		Fingerprint:     alertResp.Fingerprint,
+		Name:            alertResp.Name,
+		Status:          alertResp.Status,
+		Severity:        alertResp.Severity,
+		Description:     alertResp.Description,
+		Source:          source,
+		Labels:          labels,
+		FiringStartTime: firingStartTime,
+		Enrichments:     enrichments,
+	}
+}
+
 func (c *Client) GetAlert(ctx context.Context, fingerprint string) (*port.KeepAlert, error) {
 	start := time.Now()
 	reqURL := c.baseURL + "/alerts/" + url.PathEscape(fingerprint)
@@ -246,56 +301,63 @@ func (c *Client) GetAlert(ctx context.Context, fingerprint string) (*port.KeepAl
 	)
 	keepGetAlertOK.Inc()
 
-	labels := make(map[string]string, len(alertResp.Labels))
-	for k, v := range alertResp.Labels {
-		if s, ok := v.(string); ok {
-			labels[k] = s
-		} else {
-			labels[k] = fmt.Sprintf("%v", v)
-		}
+	result := c.parseAlertResponse(alertResp)
+	return &result, nil
+}
+
+func (c *Client) GetAlerts(ctx context.Context, limit int) ([]port.KeepAlert, error) {
+	start := time.Now()
+	reqURL := fmt.Sprintf("%s/alerts?limit=%d", c.baseURL, limit)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("X-API-KEY", c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		duration := time.Since(start).Milliseconds()
+		c.logger.Error("Keep GetAlerts failed",
+			logger.ExternalFieldsWithError("keep", reqURL, "GET", 0, duration, err.Error()),
+		)
+		keepGetAlertsErr.Inc()
+		return nil, fmt.Errorf("keep get alerts: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	duration := time.Since(start).Milliseconds()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		c.logger.Error("Keep GetAlerts non-200",
+			logger.ExternalFieldsWithError("keep", reqURL, "GET", resp.StatusCode, duration, string(respBody)),
+		)
+		keepGetAlertsErr.Inc()
+		return nil, fmt.Errorf("keep get alerts: status %d, body: %s", resp.StatusCode, respBody)
 	}
 
-	var firingStartTime time.Time
-	if alertResp.FiringStartTime != "" {
-		var parseErr error
-		firingStartTime, parseErr = time.Parse(time.RFC3339, alertResp.FiringStartTime)
-		if parseErr != nil {
-			c.logger.Debug("Failed to parse firingStartTime from Keep API",
-				slog.String("value", alertResp.FiringStartTime),
-				slog.String("error", parseErr.Error()),
-			)
-		}
+	var alertsResp []alertResponse
+	if err := json.NewDecoder(resp.Body).Decode(&alertsResp); err != nil {
+		c.logger.Error("Keep GetAlerts decode failed",
+			logger.ExternalFieldsWithError("keep", reqURL, "GET", resp.StatusCode, duration, err.Error()),
+		)
+		keepGetAlertsErr.Inc()
+		return nil, fmt.Errorf("decode alerts response: %w", err)
 	}
 
-	source := alertResp.Source
-	if source == nil {
-		source = []string{}
+	c.logger.Debug("Keep GetAlerts completed",
+		logger.ExternalFields("keep", reqURL, "GET", resp.StatusCode, duration),
+		slog.Int("count", len(alertsResp)),
+	)
+	keepGetAlertsOK.Inc()
+
+	alerts := make([]port.KeepAlert, 0, len(alertsResp))
+	for _, alertResp := range alertsResp {
+		alerts = append(alerts, c.parseAlertResponse(alertResp))
 	}
 
-	enrichments := make(map[string]string)
-	for k, v := range alertResp.Enrichments {
-		if str, ok := v.(string); ok {
-			enrichments[k] = str
-		} else if v != nil {
-			enrichments[k] = fmt.Sprintf("%v", v)
-		}
-	}
-	// Keep API returns assignee as top-level field, add it to enrichments for consistency
-	if alertResp.Assignee != "" {
-		enrichments["assignee"] = alertResp.Assignee
-	}
-
-	return &port.KeepAlert{
-		Fingerprint:     alertResp.Fingerprint,
-		Name:            alertResp.Name,
-		Status:          alertResp.Status,
-		Severity:        alertResp.Severity,
-		Description:     alertResp.Description,
-		Source:          source,
-		Labels:          labels,
-		FiringStartTime: firingStartTime,
-		Enrichments:     enrichments,
-	}, nil
+	return alerts, nil
 }
 
 type providersResponse struct {

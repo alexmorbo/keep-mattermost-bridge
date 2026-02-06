@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -124,6 +125,48 @@ func main() {
 		MaxHeaderBytes:    1 << 20,
 	}
 
+	var pollWg sync.WaitGroup
+	pollDone := make(chan struct{})
+
+	if cfg.Polling.Enabled {
+		pollAlertsUC := usecase.NewPollAlertsUseCase(
+			postRepo,
+			keepClient,
+			mmClient,
+			msgBuilder,
+			fileCfg,
+			cfg.Keep.UIURL,
+			cfg.CallbackURL,
+			cfg.Polling.AlertsLimit,
+			log.With("component", "poll_alerts_usecase"),
+		)
+
+		pollWg.Add(1)
+		go func() {
+			defer pollWg.Done()
+			ticker := time.NewTicker(cfg.Polling.Interval)
+			defer ticker.Stop()
+
+			log.Info("polling started", "interval", cfg.Polling.Interval)
+
+			for {
+				select {
+				case <-ticker.C:
+					pollCtx, pollCancel := context.WithTimeout(context.Background(), 30*time.Second)
+					if err := pollAlertsUC.Execute(pollCtx); err != nil {
+						log.Error("polling failed", "error", err)
+					}
+					pollCancel()
+				case <-pollDone:
+					log.Info("polling stopped")
+					return
+				}
+			}
+		}()
+	} else {
+		log.Info("polling disabled")
+	}
+
 	errCh := make(chan error, 1)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -142,6 +185,9 @@ func main() {
 	case <-quit:
 		log.Info("shutting down...")
 	}
+
+	close(pollDone)
+	pollWg.Wait()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
