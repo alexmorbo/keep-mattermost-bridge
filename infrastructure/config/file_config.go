@@ -26,6 +26,7 @@ type FilePollingConfig struct {
 	Enabled     *bool  `yaml:"enabled"`
 	Interval    string `yaml:"interval"`
 	AlertsLimit *int   `yaml:"alerts_limit"`
+	Timeout     string `yaml:"timeout"`
 }
 
 type FileSetupConfig struct {

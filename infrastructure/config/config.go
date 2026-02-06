@@ -29,6 +29,7 @@ type PollingConfig struct {
 	Enabled     bool          // Enable background polling
 	Interval    time.Duration // Interval between polling cycles (minimum 10s)
 	AlertsLimit int           // Maximum alerts to fetch from Keep API per poll (default 1000)
+	Timeout     time.Duration // Timeout for each polling cycle (default 30s)
 }
 
 type ServerConfig struct {
@@ -83,6 +84,11 @@ func LoadFromEnv() (*Config, error) {
 		return nil, err
 	}
 
+	pollingTimeout, err := getEnvOrDefaultDuration("POLLING_TIMEOUT", 30*time.Second)
+	if err != nil {
+		return nil, err
+	}
+
 	setupEnabled, err := getEnvOrDefaultBool("KEEP_SETUP_ENABLED", true)
 	if err != nil {
 		return nil, err
@@ -111,6 +117,7 @@ func LoadFromEnv() (*Config, error) {
 			Enabled:     pollingEnabled,
 			Interval:    pollingInterval,
 			AlertsLimit: pollingAlertsLimit,
+			Timeout:     pollingTimeout,
 		},
 		Setup: SetupConfig{
 			Enabled: setupEnabled,
@@ -119,7 +126,7 @@ func LoadFromEnv() (*Config, error) {
 		CallbackURL: os.Getenv("CALLBACK_URL"),
 	}
 
-	if err := cfg.validate(); err != nil {
+	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 
@@ -141,6 +148,11 @@ func (c *Config) ApplyFileConfig(fc *FileConfig) {
 	if os.Getenv("POLLING_ALERTS_LIMIT") == "" && fc.Polling.AlertsLimit != nil {
 		c.Polling.AlertsLimit = *fc.Polling.AlertsLimit
 	}
+	if os.Getenv("POLLING_TIMEOUT") == "" && fc.Polling.Timeout != "" {
+		if d, err := time.ParseDuration(fc.Polling.Timeout); err == nil {
+			c.Polling.Timeout = d
+		}
+	}
 
 	// Setup: use file config if env not set
 	if os.Getenv("KEEP_SETUP_ENABLED") == "" && fc.Setup.Enabled != nil {
@@ -148,7 +160,7 @@ func (c *Config) ApplyFileConfig(fc *FileConfig) {
 	}
 }
 
-func (c *Config) validate() error {
+func (c *Config) Validate() error {
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		return fmt.Errorf("SERVER_PORT must be between 1 and 65535, got %d", c.Server.Port)
 	}

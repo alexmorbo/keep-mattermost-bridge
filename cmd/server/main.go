@@ -50,6 +50,12 @@ func main() {
 	// Apply file config settings (env variables have priority)
 	cfg.ApplyFileConfig(fileCfg)
 
+	// Re-validate config after applying file config
+	if err := cfg.Validate(); err != nil {
+		log.Error("invalid config after applying file config", "error", err)
+		os.Exit(1)
+	}
+
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:     cfg.Redis.Addr,
 		Password: cfg.Redis.Password,
@@ -154,12 +160,12 @@ func main() {
 			ticker := time.NewTicker(cfg.Polling.Interval)
 			defer ticker.Stop()
 
-			log.Info("polling started", "interval", cfg.Polling.Interval)
+			log.Info("polling started", "interval", cfg.Polling.Interval, "timeout", cfg.Polling.Timeout)
 
 			for {
 				select {
 				case <-ticker.C:
-					pollCtx, pollCancel := context.WithTimeout(context.Background(), 30*time.Second)
+					pollCtx, pollCancel := context.WithTimeout(context.Background(), cfg.Polling.Timeout)
 					if err := pollAlertsUC.Execute(pollCtx); err != nil {
 						log.Error("polling failed", "error", err)
 					}
