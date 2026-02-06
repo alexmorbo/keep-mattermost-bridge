@@ -210,6 +210,46 @@ func (b *Builder) BuildResolvedAttachment(a *alert.Alert, keepUIURL, acknowledge
 	}
 }
 
+func (b *Builder) BuildSuppressedAttachment(a *alert.Alert, keepUIURL string) post.Attachment {
+	return b.buildStatusAttachment(a, keepUIURL, "suppressed", "🔇", "Alert suppressed")
+}
+
+func (b *Builder) BuildPendingAttachment(a *alert.Alert, keepUIURL string) post.Attachment {
+	return b.buildStatusAttachment(a, keepUIURL, "pending", "⏳", "Alert pending")
+}
+
+func (b *Builder) BuildMaintenanceAttachment(a *alert.Alert, keepUIURL string) post.Attachment {
+	return b.buildStatusAttachment(a, keepUIURL, "maintenance", "🔧", "Under maintenance")
+}
+
+func (b *Builder) buildStatusAttachment(a *alert.Alert, keepUIURL, colorKey, emoji, footer string) post.Attachment {
+	severity := a.Severity().String()
+	color := b.msgConfig.ColorForSeverity(colorKey)
+
+	title := fmt.Sprintf("%s %s", emoji, a.Name())
+	if duration := formatDuration(a.FiringStartTime()); duration != "" {
+		title = fmt.Sprintf("%s (%s)", title, duration)
+	}
+	titleLink := fmt.Sprintf("%s/alerts/feed?fingerprint=%s", keepUIURL, url.QueryEscape(a.Fingerprint().Value()))
+
+	fields := b.buildFields(a.Labels(), severity)
+
+	if b.msgConfig.ShowDescriptionField() && a.Description() != "" {
+		fields = append([]post.AttachmentField{
+			{Title: "Description", Value: a.Description(), Short: false},
+		}, fields...)
+	}
+
+	return post.Attachment{
+		Color:      color,
+		Title:      title,
+		TitleLink:  titleLink,
+		Fields:     fields,
+		Footer:     footer,
+		FooterIcon: b.msgConfig.FooterIconURL(),
+	}
+}
+
 func (b *Builder) BuildProcessingAttachment(attachmentJSON, action string) (post.Attachment, error) {
 	attachment, err := post.AttachmentFromJSON(attachmentJSON)
 	if err != nil {

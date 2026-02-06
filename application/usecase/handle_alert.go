@@ -108,6 +108,18 @@ func (uc *HandleAlertUseCase) Execute(ctx context.Context, input dto.KeepAlertIn
 		return uc.handleAcknowledged(ctx, a, fingerprint)
 	}
 
+	if status.IsSuppressed() {
+		return uc.handleSuppressed(ctx, a, fingerprint)
+	}
+
+	if status.IsPending() {
+		return uc.handlePending(ctx, a, fingerprint)
+	}
+
+	if status.IsMaintenance() {
+		return uc.handleMaintenance(ctx, a, fingerprint)
+	}
+
 	return nil
 }
 
@@ -448,4 +460,184 @@ func (uc *HandleAlertUseCase) fetchAssigneeWithRetry(ctx context.Context, finger
 	)
 	assigneeRetryExhausted.Inc()
 	return ""
+}
+
+func (uc *HandleAlertUseCase) handleSuppressed(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint) error {
+	existingPost, err := uc.postRepo.FindByFingerprint(ctx, fingerprint)
+	if err != nil && !errors.Is(err, post.ErrNotFound) {
+		return fmt.Errorf("find existing post: %w", err)
+	}
+
+	channelID := uc.channelResolver.ChannelIDForSeverity(a.Severity().String())
+
+	if existingPost == nil {
+		return uc.createSuppressedPost(ctx, a, fingerprint, channelID)
+	}
+
+	alertWithStoredTime := alert.RestoreAlert(
+		fingerprint, a.Name(), a.Severity(), a.Status(),
+		a.Description(), a.Source(), a.Labels(),
+		existingPost.FiringStartTime(),
+	)
+	attachment := uc.msgBuilder.BuildSuppressedAttachment(alertWithStoredTime, uc.keepUIURL)
+
+	if err := uc.mmClient.UpdatePost(ctx, existingPost.PostID(), attachment); err != nil {
+		return fmt.Errorf("update post to suppressed: %w", err)
+	}
+
+	uc.logger.Info("Alert suppressed",
+		logger.ApplicationFields("alert_suppressed",
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("post_id", existingPost.PostID()),
+		),
+	)
+	alertSuppressedCounter.Inc()
+
+	return nil
+}
+
+func (uc *HandleAlertUseCase) createSuppressedPost(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, channelID string) error {
+	attachment := uc.msgBuilder.BuildSuppressedAttachment(a, uc.keepUIURL)
+
+	postID, err := uc.mmClient.CreatePost(ctx, channelID, attachment)
+	if err != nil {
+		return fmt.Errorf("create mattermost post: %w", err)
+	}
+
+	newPost := post.NewPost(postID, channelID, fingerprint, a.Name(), a.Severity(), a.FiringStartTime())
+	if err := uc.postRepo.Save(ctx, fingerprint, newPost); err != nil {
+		return fmt.Errorf("save post to store: %w", err)
+	}
+
+	uc.logger.Info("Suppressed alert posted to Mattermost",
+		logger.ApplicationFields("alert_posted_suppressed",
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("severity", a.Severity().String()),
+			slog.String("channel_id", channelID),
+			slog.String("post_id", postID),
+		),
+	)
+	alertsPostedCounter(a.Severity().String(), channelID).Inc()
+
+	return nil
+}
+
+func (uc *HandleAlertUseCase) handlePending(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint) error {
+	existingPost, err := uc.postRepo.FindByFingerprint(ctx, fingerprint)
+	if err != nil && !errors.Is(err, post.ErrNotFound) {
+		return fmt.Errorf("find existing post: %w", err)
+	}
+
+	channelID := uc.channelResolver.ChannelIDForSeverity(a.Severity().String())
+
+	if existingPost == nil {
+		return uc.createPendingPost(ctx, a, fingerprint, channelID)
+	}
+
+	alertWithStoredTime := alert.RestoreAlert(
+		fingerprint, a.Name(), a.Severity(), a.Status(),
+		a.Description(), a.Source(), a.Labels(),
+		existingPost.FiringStartTime(),
+	)
+	attachment := uc.msgBuilder.BuildPendingAttachment(alertWithStoredTime, uc.keepUIURL)
+
+	if err := uc.mmClient.UpdatePost(ctx, existingPost.PostID(), attachment); err != nil {
+		return fmt.Errorf("update post to pending: %w", err)
+	}
+
+	uc.logger.Info("Alert pending",
+		logger.ApplicationFields("alert_pending",
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("post_id", existingPost.PostID()),
+		),
+	)
+	alertPendingCounter.Inc()
+
+	return nil
+}
+
+func (uc *HandleAlertUseCase) createPendingPost(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, channelID string) error {
+	attachment := uc.msgBuilder.BuildPendingAttachment(a, uc.keepUIURL)
+
+	postID, err := uc.mmClient.CreatePost(ctx, channelID, attachment)
+	if err != nil {
+		return fmt.Errorf("create mattermost post: %w", err)
+	}
+
+	newPost := post.NewPost(postID, channelID, fingerprint, a.Name(), a.Severity(), a.FiringStartTime())
+	if err := uc.postRepo.Save(ctx, fingerprint, newPost); err != nil {
+		return fmt.Errorf("save post to store: %w", err)
+	}
+
+	uc.logger.Info("Pending alert posted to Mattermost",
+		logger.ApplicationFields("alert_posted_pending",
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("severity", a.Severity().String()),
+			slog.String("channel_id", channelID),
+			slog.String("post_id", postID),
+		),
+	)
+	alertsPostedCounter(a.Severity().String(), channelID).Inc()
+
+	return nil
+}
+
+func (uc *HandleAlertUseCase) handleMaintenance(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint) error {
+	existingPost, err := uc.postRepo.FindByFingerprint(ctx, fingerprint)
+	if err != nil && !errors.Is(err, post.ErrNotFound) {
+		return fmt.Errorf("find existing post: %w", err)
+	}
+
+	channelID := uc.channelResolver.ChannelIDForSeverity(a.Severity().String())
+
+	if existingPost == nil {
+		return uc.createMaintenancePost(ctx, a, fingerprint, channelID)
+	}
+
+	alertWithStoredTime := alert.RestoreAlert(
+		fingerprint, a.Name(), a.Severity(), a.Status(),
+		a.Description(), a.Source(), a.Labels(),
+		existingPost.FiringStartTime(),
+	)
+	attachment := uc.msgBuilder.BuildMaintenanceAttachment(alertWithStoredTime, uc.keepUIURL)
+
+	if err := uc.mmClient.UpdatePost(ctx, existingPost.PostID(), attachment); err != nil {
+		return fmt.Errorf("update post to maintenance: %w", err)
+	}
+
+	uc.logger.Info("Alert under maintenance",
+		logger.ApplicationFields("alert_maintenance",
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("post_id", existingPost.PostID()),
+		),
+	)
+	alertMaintenanceCounter.Inc()
+
+	return nil
+}
+
+func (uc *HandleAlertUseCase) createMaintenancePost(ctx context.Context, a *alert.Alert, fingerprint alert.Fingerprint, channelID string) error {
+	attachment := uc.msgBuilder.BuildMaintenanceAttachment(a, uc.keepUIURL)
+
+	postID, err := uc.mmClient.CreatePost(ctx, channelID, attachment)
+	if err != nil {
+		return fmt.Errorf("create mattermost post: %w", err)
+	}
+
+	newPost := post.NewPost(postID, channelID, fingerprint, a.Name(), a.Severity(), a.FiringStartTime())
+	if err := uc.postRepo.Save(ctx, fingerprint, newPost); err != nil {
+		return fmt.Errorf("save post to store: %w", err)
+	}
+
+	uc.logger.Info("Maintenance alert posted to Mattermost",
+		logger.ApplicationFields("alert_posted_maintenance",
+			slog.String("fingerprint", fingerprint.Value()),
+			slog.String("severity", a.Severity().String()),
+			slog.String("channel_id", channelID),
+			slog.String("post_id", postID),
+		),
+	)
+	alertsPostedCounter(a.Severity().String(), channelID).Inc()
+
+	return nil
 }

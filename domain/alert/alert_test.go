@@ -268,6 +268,42 @@ func TestNewStatus(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name:        "suppressed status",
+			value:       StatusSuppressed,
+			expected:    StatusSuppressed,
+			expectError: false,
+		},
+		{
+			name:        "suppressed status uppercase",
+			value:       "SUPPRESSED",
+			expected:    StatusSuppressed,
+			expectError: false,
+		},
+		{
+			name:        "pending status",
+			value:       StatusPending,
+			expected:    StatusPending,
+			expectError: false,
+		},
+		{
+			name:        "pending status mixed case",
+			value:       "Pending",
+			expected:    StatusPending,
+			expectError: false,
+		},
+		{
+			name:        "maintenance status",
+			value:       StatusMaintenance,
+			expected:    StatusMaintenance,
+			expectError: false,
+		},
+		{
+			name:        "maintenance status uppercase",
+			value:       "MAINTENANCE",
+			expected:    StatusMaintenance,
+			expectError: false,
+		},
+		{
 			name:        "invalid status",
 			value:       "invalid",
 			expectError: true,
@@ -329,6 +365,30 @@ func TestStatusIsAcknowledged(t *testing.T) {
 	assert.False(t, firing.IsAcknowledged())
 	assert.False(t, resolved.IsAcknowledged())
 	assert.True(t, acknowledged.IsAcknowledged())
+}
+
+func TestStatusIsSuppressed(t *testing.T) {
+	firing := RestoreStatus(StatusFiring)
+	suppressed := RestoreStatus(StatusSuppressed)
+
+	assert.False(t, firing.IsSuppressed())
+	assert.True(t, suppressed.IsSuppressed())
+}
+
+func TestStatusIsPending(t *testing.T) {
+	firing := RestoreStatus(StatusFiring)
+	pending := RestoreStatus(StatusPending)
+
+	assert.False(t, firing.IsPending())
+	assert.True(t, pending.IsPending())
+}
+
+func TestStatusIsMaintenance(t *testing.T) {
+	firing := RestoreStatus(StatusFiring)
+	maintenance := RestoreStatus(StatusMaintenance)
+
+	assert.False(t, firing.IsMaintenance())
+	assert.True(t, maintenance.IsMaintenance())
 }
 
 // Alert entity tests

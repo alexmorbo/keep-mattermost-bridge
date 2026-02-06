@@ -196,6 +196,27 @@ func (m *mockMessageBuilder) BuildResolvedAttachment(a *alert.Alert, keepUIURL, 
 	}
 }
 
+func (m *mockMessageBuilder) BuildSuppressedAttachment(a *alert.Alert, keepUIURL string) post.Attachment {
+	return post.Attachment{
+		Color: "#9370DB",
+		Title: "SUPPRESSED: " + a.Name(),
+	}
+}
+
+func (m *mockMessageBuilder) BuildPendingAttachment(a *alert.Alert, keepUIURL string) post.Attachment {
+	return post.Attachment{
+		Color: "#87CEEB",
+		Title: "PENDING: " + a.Name(),
+	}
+}
+
+func (m *mockMessageBuilder) BuildMaintenanceAttachment(a *alert.Alert, keepUIURL string) post.Attachment {
+	return post.Attachment{
+		Color: "#708090",
+		Title: "MAINTENANCE: " + a.Name(),
+	}
+}
+
 func (m *mockMessageBuilder) BuildProcessingAttachment(attachmentJSON, action string) (post.Attachment, error) {
 	return post.Attachment{
 		Color: "#808080",
@@ -865,4 +886,167 @@ func TestFetchAssigneeWithRetry_FallsBackToKeepUsername(t *testing.T) {
 	assignee := uc.fetchAssigneeWithRetry(ctx, "fp-12345")
 
 	assert.Equal(t, "unmapped@keep.local", assignee, "should return Keep username when no mapping exists")
+}
+
+// Tests for new statuses: suppressed, pending, maintenance
+
+func TestHandleAlertUseCase_SuppressedStatusCreatesPost(t *testing.T) {
+	uc, postRepo, mmClient, _, _, _ := setupHandleAlertUseCase()
+	ctx := context.Background()
+
+	input := dto.KeepAlertInput{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Severity:    "high",
+		Status:      "suppressed",
+		Description: "Test description",
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
+	}
+
+	err := uc.Execute(ctx, input)
+
+	require.NoError(t, err)
+	assert.True(t, mmClient.createPostCalled)
+	assert.True(t, postRepo.saveCalled)
+}
+
+func TestHandleAlertUseCase_SuppressedStatusUpdatesExistingPost(t *testing.T) {
+	uc, postRepo, mmClient, _, _, _ := setupHandleAlertUseCase()
+	ctx := context.Background()
+
+	fp, _ := alert.NewFingerprint("fp-12345")
+	existingPost := post.NewPost("existing-post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"), time.Now())
+	postRepo.posts[fp.Value()] = existingPost
+
+	input := dto.KeepAlertInput{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Severity:    "high",
+		Status:      "suppressed",
+		Description: "Test description",
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
+	}
+
+	err := uc.Execute(ctx, input)
+
+	require.NoError(t, err)
+	assert.False(t, mmClient.createPostCalled)
+	assert.True(t, mmClient.updatePostCalled)
+	assert.Equal(t, "existing-post-123", mmClient.updatedPostID)
+}
+
+func TestHandleAlertUseCase_PendingStatusCreatesPost(t *testing.T) {
+	uc, postRepo, mmClient, _, _, _ := setupHandleAlertUseCase()
+	ctx := context.Background()
+
+	input := dto.KeepAlertInput{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Severity:    "high",
+		Status:      "pending",
+		Description: "Test description",
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
+	}
+
+	err := uc.Execute(ctx, input)
+
+	require.NoError(t, err)
+	assert.True(t, mmClient.createPostCalled)
+	assert.True(t, postRepo.saveCalled)
+}
+
+func TestHandleAlertUseCase_PendingStatusUpdatesExistingPost(t *testing.T) {
+	uc, postRepo, mmClient, _, _, _ := setupHandleAlertUseCase()
+	ctx := context.Background()
+
+	fp, _ := alert.NewFingerprint("fp-12345")
+	existingPost := post.NewPost("existing-post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"), time.Now())
+	postRepo.posts[fp.Value()] = existingPost
+
+	input := dto.KeepAlertInput{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Severity:    "high",
+		Status:      "pending",
+		Description: "Test description",
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
+	}
+
+	err := uc.Execute(ctx, input)
+
+	require.NoError(t, err)
+	assert.False(t, mmClient.createPostCalled)
+	assert.True(t, mmClient.updatePostCalled)
+	assert.Equal(t, "existing-post-123", mmClient.updatedPostID)
+}
+
+func TestHandleAlertUseCase_MaintenanceStatusCreatesPost(t *testing.T) {
+	uc, postRepo, mmClient, _, _, _ := setupHandleAlertUseCase()
+	ctx := context.Background()
+
+	input := dto.KeepAlertInput{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Severity:    "high",
+		Status:      "maintenance",
+		Description: "Test description",
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
+	}
+
+	err := uc.Execute(ctx, input)
+
+	require.NoError(t, err)
+	assert.True(t, mmClient.createPostCalled)
+	assert.True(t, postRepo.saveCalled)
+}
+
+func TestHandleAlertUseCase_MaintenanceStatusUpdatesExistingPost(t *testing.T) {
+	uc, postRepo, mmClient, _, _, _ := setupHandleAlertUseCase()
+	ctx := context.Background()
+
+	fp, _ := alert.NewFingerprint("fp-12345")
+	existingPost := post.NewPost("existing-post-123", "channel-456", alert.RestoreFingerprint("fp-12345"), "Test Alert", alert.RestoreSeverity("high"), time.Now())
+	postRepo.posts[fp.Value()] = existingPost
+
+	input := dto.KeepAlertInput{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Severity:    "high",
+		Status:      "maintenance",
+		Description: "Test description",
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
+	}
+
+	err := uc.Execute(ctx, input)
+
+	require.NoError(t, err)
+	assert.False(t, mmClient.createPostCalled)
+	assert.True(t, mmClient.updatePostCalled)
+	assert.Equal(t, "existing-post-123", mmClient.updatedPostID)
+}
+
+func TestHandleAlertUseCase_InvalidStatusReturnsError(t *testing.T) {
+	uc, _, _, _, _, _ := setupHandleAlertUseCase()
+	ctx := context.Background()
+
+	input := dto.KeepAlertInput{
+		Fingerprint: "fp-12345",
+		Name:        "Test Alert",
+		Severity:    "high",
+		Status:      "unknown_status",
+		Description: "Test description",
+		Source:      []string{"prometheus"},
+		Labels:      map[string]string{},
+	}
+
+	err := uc.Execute(ctx, input)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse status")
 }

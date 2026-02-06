@@ -513,6 +513,9 @@ func TestApplyDefaults(t *testing.T) {
 	assert.Equal(t, "#0066FF", cfg.Message.Colors["info"])
 	assert.Equal(t, "#FFA500", cfg.Message.Colors["acknowledged"])
 	assert.Equal(t, "#00CC00", cfg.Message.Colors["resolved"])
+	assert.Equal(t, "#9370DB", cfg.Message.Colors["suppressed"])
+	assert.Equal(t, "#87CEEB", cfg.Message.Colors["pending"])
+	assert.Equal(t, "#708090", cfg.Message.Colors["maintenance"])
 
 	assert.NotNil(t, cfg.Message.Emoji)
 	assert.Equal(t, "🔴", cfg.Message.Emoji["critical"])

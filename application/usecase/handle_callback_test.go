@@ -274,6 +274,27 @@ func (m *mockMessageBuilderCallback) BuildResolvedAttachment(a *alert.Alert, kee
 	}
 }
 
+func (m *mockMessageBuilderCallback) BuildSuppressedAttachment(a *alert.Alert, keepUIURL string) post.Attachment {
+	return post.Attachment{
+		Color: "#9370DB",
+		Title: "SUPPRESSED: " + a.Name(),
+	}
+}
+
+func (m *mockMessageBuilderCallback) BuildPendingAttachment(a *alert.Alert, keepUIURL string) post.Attachment {
+	return post.Attachment{
+		Color: "#87CEEB",
+		Title: "PENDING: " + a.Name(),
+	}
+}
+
+func (m *mockMessageBuilderCallback) BuildMaintenanceAttachment(a *alert.Alert, keepUIURL string) post.Attachment {
+	return post.Attachment{
+		Color: "#708090",
+		Title: "MAINTENANCE: " + a.Name(),
+	}
+}
+
 func (m *mockMessageBuilderCallback) BuildProcessingAttachment(attachmentJSON, action string) (post.Attachment, error) {
 	return post.Attachment{
 		Color: "#808080",

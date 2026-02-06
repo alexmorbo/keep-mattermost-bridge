@@ -120,6 +120,9 @@ func (c *FileConfig) applyDefaults() {
 			"low":          "#808080",
 			"acknowledged": "#FFA500",
 			"resolved":     "#00CC00",
+			"suppressed":   "#9370DB",
+			"pending":      "#87CEEB",
+			"maintenance":  "#708090",
 		}
 	}
 	if c.Message.Emoji == nil {

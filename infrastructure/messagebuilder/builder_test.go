@@ -1132,3 +1132,138 @@ func TestBuildFieldsWithGrouping(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildSuppressedAttachment(t *testing.T) {
+	fileConfig := &config.FileConfig{
+		Message: config.MessageConfig{
+			Colors: map[string]string{"suppressed": "#9370DB"},
+			Emoji:  map[string]string{},
+			Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
+		},
+		Labels: config.LabelsConfig{
+			Display:  []string{},
+			Exclude:  []string{},
+			Rename:   map[string]string{},
+			Grouping: config.LabelGroupingConfig{},
+		},
+	}
+
+	builder := NewBuilder(fileConfig)
+
+	severity, err := alert.NewSeverity("critical")
+	require.NoError(t, err)
+
+	fingerprint := alert.RestoreFingerprint("suppressed-fingerprint-123")
+	status := alert.RestoreStatus(alert.StatusSuppressed)
+
+	testAlert := alert.RestoreAlert(
+		fingerprint,
+		"Suppressed Alert",
+		severity,
+		status,
+		"Alert was suppressed",
+		"prometheus",
+		map[string]string{"env": "production"},
+		time.Time{},
+	)
+
+	attachment := builder.BuildSuppressedAttachment(testAlert, "http://keep.ui")
+
+	assert.Equal(t, "#9370DB", attachment.Color, "should have purple color")
+	assert.Contains(t, attachment.Title, "🔇")
+	assert.Contains(t, attachment.Title, "Suppressed Alert")
+	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?fingerprint=suppressed-fingerprint-123")
+	assert.Len(t, attachment.Actions, 0, "should have no buttons")
+	assert.Equal(t, "Alert suppressed", attachment.Footer)
+	assert.Equal(t, "https://test.com/icon.png", attachment.FooterIcon)
+}
+
+func TestBuildPendingAttachment(t *testing.T) {
+	fileConfig := &config.FileConfig{
+		Message: config.MessageConfig{
+			Colors: map[string]string{"pending": "#87CEEB"},
+			Emoji:  map[string]string{},
+			Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
+		},
+		Labels: config.LabelsConfig{
+			Display:  []string{},
+			Exclude:  []string{},
+			Rename:   map[string]string{},
+			Grouping: config.LabelGroupingConfig{},
+		},
+	}
+
+	builder := NewBuilder(fileConfig)
+
+	severity, err := alert.NewSeverity("warning")
+	require.NoError(t, err)
+
+	fingerprint := alert.RestoreFingerprint("pending-fingerprint-456")
+	status := alert.RestoreStatus(alert.StatusPending)
+
+	testAlert := alert.RestoreAlert(
+		fingerprint,
+		"Pending Alert",
+		severity,
+		status,
+		"Alert is pending",
+		"prometheus",
+		map[string]string{"env": "staging"},
+		time.Time{},
+	)
+
+	attachment := builder.BuildPendingAttachment(testAlert, "http://keep.ui")
+
+	assert.Equal(t, "#87CEEB", attachment.Color, "should have sky blue color")
+	assert.Contains(t, attachment.Title, "⏳")
+	assert.Contains(t, attachment.Title, "Pending Alert")
+	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?fingerprint=pending-fingerprint-456")
+	assert.Len(t, attachment.Actions, 0, "should have no buttons")
+	assert.Equal(t, "Alert pending", attachment.Footer)
+	assert.Equal(t, "https://test.com/icon.png", attachment.FooterIcon)
+}
+
+func TestBuildMaintenanceAttachment(t *testing.T) {
+	fileConfig := &config.FileConfig{
+		Message: config.MessageConfig{
+			Colors: map[string]string{"maintenance": "#708090"},
+			Emoji:  map[string]string{},
+			Footer: config.FooterConfig{Text: "Keep AIOps", IconURL: "https://test.com/icon.png"},
+		},
+		Labels: config.LabelsConfig{
+			Display:  []string{},
+			Exclude:  []string{},
+			Rename:   map[string]string{},
+			Grouping: config.LabelGroupingConfig{},
+		},
+	}
+
+	builder := NewBuilder(fileConfig)
+
+	severity, err := alert.NewSeverity("high")
+	require.NoError(t, err)
+
+	fingerprint := alert.RestoreFingerprint("maintenance-fingerprint-789")
+	status := alert.RestoreStatus(alert.StatusMaintenance)
+
+	testAlert := alert.RestoreAlert(
+		fingerprint,
+		"Maintenance Alert",
+		severity,
+		status,
+		"System under maintenance",
+		"prometheus",
+		map[string]string{"env": "production"},
+		time.Time{},
+	)
+
+	attachment := builder.BuildMaintenanceAttachment(testAlert, "http://keep.ui")
+
+	assert.Equal(t, "#708090", attachment.Color, "should have slate gray color")
+	assert.Contains(t, attachment.Title, "🔧")
+	assert.Contains(t, attachment.Title, "Maintenance Alert")
+	assert.Contains(t, attachment.TitleLink, "http://keep.ui/alerts/feed?fingerprint=maintenance-fingerprint-789")
+	assert.Len(t, attachment.Actions, 0, "should have no buttons")
+	assert.Equal(t, "Under maintenance", attachment.Footer)
+	assert.Equal(t, "https://test.com/icon.png", attachment.FooterIcon)
+}

@@ -13,12 +13,18 @@ const (
 	StatusFiring       = "firing"
 	StatusResolved     = "resolved"
 	StatusAcknowledged = "acknowledged"
+	StatusSuppressed   = "suppressed"
+	StatusPending      = "pending"
+	StatusMaintenance  = "maintenance"
 )
 
 var validStatuses = map[string]bool{
 	StatusFiring:       true,
 	StatusResolved:     true,
 	StatusAcknowledged: true,
+	StatusSuppressed:   true,
+	StatusPending:      true,
+	StatusMaintenance:  true,
 }
 
 func NewStatus(value string) (Status, error) {
@@ -51,4 +57,16 @@ func (s Status) IsResolved() bool {
 
 func (s Status) IsAcknowledged() bool {
 	return s.value == StatusAcknowledged
+}
+
+func (s Status) IsSuppressed() bool {
+	return s.value == StatusSuppressed
+}
+
+func (s Status) IsPending() bool {
+	return s.value == StatusPending
+}
+
+func (s Status) IsMaintenance() bool {
+	return s.value == StatusMaintenance
 }
