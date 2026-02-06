@@ -126,6 +126,28 @@ func LoadFromEnv() (*Config, error) {
 	return cfg, nil
 }
 
+// ApplyFileConfig applies settings from FileConfig if env variables are not set.
+// Env variables have priority over file config.
+func (c *Config) ApplyFileConfig(fc *FileConfig) {
+	// Polling: use file config if env not set
+	if os.Getenv("POLLING_ENABLED") == "" && fc.Polling.Enabled != nil {
+		c.Polling.Enabled = *fc.Polling.Enabled
+	}
+	if os.Getenv("POLLING_INTERVAL") == "" && fc.Polling.Interval != "" {
+		if d, err := time.ParseDuration(fc.Polling.Interval); err == nil {
+			c.Polling.Interval = d
+		}
+	}
+	if os.Getenv("POLLING_ALERTS_LIMIT") == "" && fc.Polling.AlertsLimit != nil {
+		c.Polling.AlertsLimit = *fc.Polling.AlertsLimit
+	}
+
+	// Setup: use file config if env not set
+	if os.Getenv("KEEP_SETUP_ENABLED") == "" && fc.Setup.Enabled != nil {
+		c.Setup.Enabled = *fc.Setup.Enabled
+	}
+}
+
 func (c *Config) validate() error {
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		return fmt.Errorf("SERVER_PORT must be between 1 and 65535, got %d", c.Server.Port)

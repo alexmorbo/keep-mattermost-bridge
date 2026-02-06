@@ -14,10 +14,22 @@ import (
 )
 
 type FileConfig struct {
-	Channels ChannelsConfig `yaml:"channels"`
-	Message  MessageConfig  `yaml:"message"`
-	Labels   LabelsConfig   `yaml:"labels"`
-	Users    UsersConfig    `yaml:"users"`
+	Channels ChannelsConfig    `yaml:"channels"`
+	Message  MessageConfig     `yaml:"message"`
+	Labels   LabelsConfig      `yaml:"labels"`
+	Users    UsersConfig       `yaml:"users"`
+	Polling  FilePollingConfig `yaml:"polling"`
+	Setup    FileSetupConfig   `yaml:"setup"`
+}
+
+type FilePollingConfig struct {
+	Enabled     *bool  `yaml:"enabled"`
+	Interval    string `yaml:"interval"`
+	AlertsLimit *int   `yaml:"alerts_limit"`
+}
+
+type FileSetupConfig struct {
+	Enabled *bool `yaml:"enabled"`
 }
 
 type ChannelsConfig struct {

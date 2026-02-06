@@ -47,6 +47,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Apply file config settings (env variables have priority)
+	cfg.ApplyFileConfig(fileCfg)
+
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:     cfg.Redis.Addr,
 		Password: cfg.Redis.Password,
