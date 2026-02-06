@@ -68,20 +68,24 @@ func main() {
 
 	keepClient := keep.NewClient(cfg.Keep.URL, cfg.Keep.APIKey, log.With("component", "keep_client"))
 
-	// Ensure Keep setup (provider and workflow)
-	// Webhook URL is derived from callback URL by replacing /callback with /webhook/alert
-	webhookURL := strings.Replace(cfg.CallbackURL, "/callback", "/webhook/alert", 1)
-	ensureSetupUC := usecase.NewEnsureKeepSetupUseCase(
-		keepClient,
-		webhookURL,
-		log.With("component", "ensure_keep_setup"),
-	)
+	// Ensure Keep setup (provider and workflow) if enabled
+	if cfg.Setup.Enabled {
+		// Webhook URL is derived from callback URL by replacing /callback with /webhook/alert
+		webhookURL := strings.Replace(cfg.CallbackURL, "/callback", "/webhook/alert", 1)
+		ensureSetupUC := usecase.NewEnsureKeepSetupUseCase(
+			keepClient,
+			webhookURL,
+			log.With("component", "ensure_keep_setup"),
+		)
 
-	setupCtx, setupCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	if err := ensureSetupUC.Execute(setupCtx); err != nil {
-		log.Warn("Failed to ensure Keep setup, continuing anyway", "error", err)
+		setupCtx, setupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := ensureSetupUC.Execute(setupCtx); err != nil {
+			log.Warn("Failed to ensure Keep setup, continuing anyway", "error", err)
+		}
+		setupCancel()
+	} else {
+		log.Info("Keep setup disabled, skipping provider/workflow creation")
 	}
-	setupCancel()
 
 	msgBuilder := messagebuilder.NewBuilder(fileCfg)
 

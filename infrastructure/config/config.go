@@ -13,8 +13,14 @@ type Config struct {
 	Keep        KeepConfig
 	Redis       RedisConfig
 	Polling     PollingConfig
+	Setup       SetupConfig
 	ConfigPath  string
 	CallbackURL string
+}
+
+// SetupConfig configures automatic Keep provider and workflow creation.
+type SetupConfig struct {
+	Enabled bool // Create webhook provider and workflow on startup (default: true)
 }
 
 // PollingConfig configures background polling for detecting assignee changes
@@ -77,6 +83,11 @@ func LoadFromEnv() (*Config, error) {
 		return nil, err
 	}
 
+	setupEnabled, err := getEnvOrDefaultBool("KEEP_SETUP_ENABLED", true)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		Server: ServerConfig{
 			Port:     serverPort,
@@ -100,6 +111,9 @@ func LoadFromEnv() (*Config, error) {
 			Enabled:     pollingEnabled,
 			Interval:    pollingInterval,
 			AlertsLimit: pollingAlertsLimit,
+		},
+		Setup: SetupConfig{
+			Enabled: setupEnabled,
 		},
 		ConfigPath:  getEnvOrDefault("CONFIG_PATH", "/etc/kmbridge/config.yaml"),
 		CallbackURL: os.Getenv("CALLBACK_URL"),
