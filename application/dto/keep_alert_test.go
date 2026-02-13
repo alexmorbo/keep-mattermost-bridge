@@ -2,8 +2,10 @@ package dto
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -136,6 +138,21 @@ func TestFlexLabels_UnmarshalJSON(t *testing.T) {
 			expected: FlexLabels{"url": "http://example.com:8080"},
 		},
 		{
+			name:     "escaped single quote in value",
+			input:    `"{'key': 'it\\'s'}"`,
+			expected: FlexLabels{"key": "it's"},
+		},
+		{
+			name:     "escaped backslash in value",
+			input:    `"{'key': 'path\\\\'}"`,
+			expected: FlexLabels{"key": `path\`},
+		},
+		{
+			name:     "multiple pairs with escaped quote",
+			input:    `"{'k1': 'v1', 'k2': 'it\\'s v2'}"`,
+			expected: FlexLabels{"k1": "v1", "k2": "it's v2"},
+		},
+		{
 			name:    "invalid json",
 			input:   `{invalid}`,
 			wantErr: true,
@@ -246,4 +263,66 @@ func TestKeepAlertInput_UnmarshalJSON(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestKeepAlertInput_BindingValidation(t *testing.T) {
+	validate := validator.New()
+	validate.SetTagName("binding")
+
+	t.Run("valid input passes", func(t *testing.T) {
+		input := KeepAlertInput{
+			Name:        "test",
+			Status:      "firing",
+			Severity:    "critical",
+			Fingerprint: "abc123",
+		}
+		err := validate.Struct(input)
+		assert.NoError(t, err)
+	})
+
+	t.Run("name exceeds max length", func(t *testing.T) {
+		input := KeepAlertInput{
+			Name:        strings.Repeat("a", 513),
+			Status:      "firing",
+			Severity:    "critical",
+			Fingerprint: "abc123",
+		}
+		err := validate.Struct(input)
+		require.Error(t, err)
+	})
+
+	t.Run("status exceeds max length", func(t *testing.T) {
+		input := KeepAlertInput{
+			Name:        "test",
+			Status:      strings.Repeat("a", 65),
+			Severity:    "critical",
+			Fingerprint: "abc123",
+		}
+		err := validate.Struct(input)
+		require.Error(t, err)
+	})
+
+	t.Run("description exceeds max length", func(t *testing.T) {
+		input := KeepAlertInput{
+			Name:        "test",
+			Status:      "firing",
+			Severity:    "critical",
+			Fingerprint: "abc123",
+			Description: strings.Repeat("a", 4097),
+		}
+		err := validate.Struct(input)
+		require.Error(t, err)
+	})
+
+	t.Run("description at max length passes", func(t *testing.T) {
+		input := KeepAlertInput{
+			Name:        "test",
+			Status:      "firing",
+			Severity:    "critical",
+			Fingerprint: "abc123",
+			Description: strings.Repeat("a", 4096),
+		}
+		err := validate.Struct(input)
+		assert.NoError(t, err)
+	})
 }

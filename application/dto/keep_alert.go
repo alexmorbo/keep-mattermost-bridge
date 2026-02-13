@@ -6,15 +6,15 @@ import (
 )
 
 type KeepAlertInput struct {
-	ID              string      `json:"id"`
-	Name            string      `json:"name"            binding:"required"`
-	Status          string      `json:"status"          binding:"required"`
-	Severity        string      `json:"severity"        binding:"required"`
+	ID              string      `json:"id"              binding:"max=256"`
+	Name            string      `json:"name"            binding:"required,max=512"`
+	Status          string      `json:"status"          binding:"required,max=64"`
+	Severity        string      `json:"severity"        binding:"required,max=64"`
 	Source          FlexStrings `json:"source"`
-	Fingerprint     string      `json:"fingerprint"     binding:"required"`
-	Description     string      `json:"description"`
+	Fingerprint     string      `json:"fingerprint"     binding:"required,max=512"`
+	Description     string      `json:"description"     binding:"max=4096"`
 	Labels          FlexLabels  `json:"labels"`
-	FiringStartTime string      `json:"firingStartTime"`
+	FiringStartTime string      `json:"firingStartTime" binding:"max=64"`
 }
 
 // FlexStrings handles both []string and Python list repr string like "['a', 'b']"
@@ -98,8 +98,10 @@ func parsePythonDict(s string) map[string]string {
 		}
 		key := strings.TrimSpace(parts[0])
 		key = strings.Trim(key, "'\"")
+		key = unescapePython(key)
 		value := strings.TrimSpace(parts[1])
 		value = strings.Trim(value, "'\"")
+		value = unescapePython(value)
 		if key != "" {
 			result[key] = value
 		}
@@ -107,19 +109,45 @@ func parsePythonDict(s string) map[string]string {
 	return result
 }
 
+func isEscaped(runes []rune, pos int) bool {
+	backslashes := 0
+	for i := pos - 1; i >= 0 && runes[i] == '\\'; i-- {
+		backslashes++
+	}
+	return backslashes%2 == 1
+}
+
+func unescapePython(s string) string {
+	var b strings.Builder
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		if runes[i] == '\\' && i+1 < len(runes) {
+			next := runes[i+1]
+			if next == '\\' || next == '\'' || next == '"' {
+				b.WriteRune(next)
+				i++
+				continue
+			}
+		}
+		b.WriteRune(runes[i])
+	}
+	return b.String()
+}
+
 func splitPythonPairs(s string) []string {
 	var pairs []string
 	var current strings.Builder
 	inQuote := false
 	quoteChar := rune(0)
+	runes := []rune(s)
 
-	for _, r := range s {
+	for i, r := range runes {
 		switch {
 		case (r == '\'' || r == '"') && !inQuote:
 			inQuote = true
 			quoteChar = r
 			current.WriteRune(r)
-		case r == quoteChar && inQuote:
+		case r == quoteChar && inQuote && !isEscaped(runes, i):
 			inQuote = false
 			quoteChar = 0
 			current.WriteRune(r)
