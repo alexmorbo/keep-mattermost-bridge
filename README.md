@@ -34,6 +34,8 @@ A webhook bridge service that connects [Keep](https://www.keephq.dev/) (AIOps/al
 
 Storage is backed by Valkey (Redis-compatible) to persist the mapping between Keep alert fingerprints and Mattermost post IDs across restarts.
 
+![Alert notification in Mattermost](docs/screenshot.png)
+
 ---
 
 ## How It Works
