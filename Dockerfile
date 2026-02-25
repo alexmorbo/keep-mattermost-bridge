@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1
 ARG GO_VERSION=1.24
-ARG IMAGE_REGISTRY=docker.io
+ARG BUILDER_REGISTRY=docker.io
+ARG RUNTIME_REGISTRY=gcr.io
 ARG GOPROXY=https://proxy.golang.org,direct
 
-FROM ${IMAGE_REGISTRY}/golang:${GO_VERSION}-alpine AS builder
+FROM ${BUILDER_REGISTRY}/golang:${GO_VERSION}-alpine AS builder
 
 ARG GOPROXY
 ENV GOPROXY=${GOPROXY}
@@ -23,7 +24,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     -o /build/bin/service \
     ./cmd/server
 
-FROM ${IMAGE_REGISTRY}/distroless/static-debian12:nonroot
+FROM ${RUNTIME_REGISTRY}/distroless/static-debian12:nonroot
 
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/

@@ -89,5 +89,4 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             GO_VERSION=1.24
-            IMAGE_REGISTRY=docker.io
             GOPROXY=https://proxy.golang.org,direct
