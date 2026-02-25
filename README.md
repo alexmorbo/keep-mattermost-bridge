@@ -121,7 +121,7 @@ docker run -p 8080:8080 \
   -e CALLBACK_URL=https://kmbridge.example.com/api/v1/callback \
   -e REDIS_ADDR=valkey:6379 \
   -v $(pwd)/config.yaml:/etc/kmbridge/config.yaml \
-  keep-mattermost-bridge:latest
+  ghcr.io/alexmorbo/keep-mattermost-bridge:latest
 ```
 
 6. Verify the service is up:
@@ -353,8 +353,8 @@ Available `make` targets:
 The image uses a multi-stage build. The final image is based on `distroless/static-debian12:nonroot` — no shell, no package manager, minimal attack surface.
 
 ```bash
-# Build
-docker build -t keep-mattermost-bridge:latest .
+# Pull from GitHub Container Registry
+docker pull ghcr.io/alexmorbo/keep-mattermost-bridge:latest
 
 # Run
 docker run -p 8080:8080 \
@@ -366,15 +366,16 @@ docker run -p 8080:8080 \
   -e CALLBACK_URL=https://kmbridge.example.com/api/v1/callback \
   -e REDIS_ADDR=valkey:6379 \
   -v $(pwd)/config.yaml:/etc/kmbridge/config.yaml \
-  keep-mattermost-bridge:latest
+  ghcr.io/alexmorbo/keep-mattermost-bridge:latest
 ```
 
-Build arguments:
+Build arguments (when building locally):
 
 | Argument | Default | Description |
 |---|---|---|
 | `GO_VERSION` | `1.24` | Go toolchain version used in the builder stage |
-| `IMAGE_REGISTRY` | `docker.io` | Registry prefix for base images |
+| `BUILDER_REGISTRY` | `docker.io` | Registry for the Go builder image |
+| `RUNTIME_REGISTRY` | `gcr.io` | Registry for the distroless runtime image |
 | `GOPROXY` | `https://proxy.golang.org,direct` | Go module proxy |
 
 
